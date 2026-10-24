@@ -2,9 +2,9 @@ name: EterBase CI
 
 on:
   push:
-    branches: [ "**" ]
+    branches: ["**"]
   pull_request:
-    branches: [ "**" ]
+    branches: ["**"]
 
 jobs:
   build-and-test:
@@ -18,7 +18,7 @@ jobs:
             cxx: g++
           - cc: clang
             cxx: clang++
-        build_type: [ Release, Debug ]
+        build_type: [Release, Debug]
 
     steps:
       - name: Checkout repository
@@ -48,4 +48,4 @@ jobs:
 
       - name: Run CTest Suite
         run: |
-          ctest --test-dir build --output-on-failure --config ${{ matrix.build_type }}
+          ctest --test-dir build --output-on-failure -C ${{ matrix.build_type }}
