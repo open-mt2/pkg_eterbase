@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 # Standalone configuration when built directly
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(EterBase LANGUAGES C CXX)
+    project(EterBase LANGUAGES C CXX VERSION 1.0.0)
 
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,61 +35,71 @@ find_library(LZO_LIBRARY NAMES lzo2 lzo REQUIRED)
 
 # Source files
 set(ETERBASE_SOURCES
-    CPostIt.cpp
-    CPostIt.h
-    CRC32.cpp
-    CRC32.h
-    Debug.cpp
-    Debug.h
-    error.cpp
-    error.h
-    FileBase.cpp
-    FileBase.h
-    FileDir.cpp
-    FileDir.h
-    FileLoader.cpp
-    FileLoader.h
-    Filename.h
-    lzo.cpp
-    lzo.h
-    MappedFile.cpp
-    MappedFile.h
-    Poly/Base.cpp
-    Poly/Base.h
-    Poly/Poly.cpp
-    Poly/Poly.h
-    Poly/Symbol.cpp
-    Poly/Symbol.h
-    Poly/SymTable.cpp
-    Poly/SymTable.h
-    Random.cpp
-    Random.h
-    ServiceDefs.h
-    Singleton.h
-    StdAfx.cpp
-    StdAfx.h
-    Stl.cpp
-    Stl.h
-    tea.cpp
-    tea.h
-    TempFile.cpp
-    TempFile.h
-    Timer.cpp
-    Timer.h
-    Utils.cpp
-    Utils.h
-    vk.h
+    src/CPostIt.cpp
+    src/CRC32.cpp
+    src/Debug.cpp
+    src/error.cpp
+    src/FileBase.cpp
+    src/FileDir.cpp
+    src/FileLoader.cpp
+    src/lzo.cpp
+    src/MappedFile.cpp
+    src/Random.cpp
+    src/StdAfx.cpp
+    src/Stl.cpp
+    src/tea.cpp
+    src/TempFile.cpp
+    src/Timer.cpp
+    src/Utils.cpp
+    src/Poly/Base.cpp
+    src/Poly/Poly.cpp
+    src/Poly/Symbol.cpp
+    src/Poly/SymTable.cpp
 )
 
-add_library(EterBase STATIC ${ETERBASE_SOURCES})
+set(ETERBASE_HEADERS
+    include/EterBase/CPostIt.h
+    include/EterBase/CRC32.h
+    include/EterBase/Debug.h
+    include/EterBase/error.h
+    include/EterBase/FileBase.h
+    include/EterBase/FileDir.h
+    include/EterBase/FileLoader.h
+    include/EterBase/Filename.h
+    include/EterBase/lzo.h
+    include/EterBase/MappedFile.h
+    include/EterBase/Random.h
+    include/EterBase/ServiceDefs.h
+    include/EterBase/Singleton.h
+    include/EterBase/StdAfx.h
+    include/EterBase/Stl.h
+    include/EterBase/tea.h
+    include/EterBase/TempFile.h
+    include/EterBase/Timer.h
+    include/EterBase/Utils.h
+    include/EterBase/vk.h
+    include/EterBase/Poly/Base.h
+    include/EterBase/Poly/Poly.h
+    include/EterBase/Poly/Symbol.h
+    include/EterBase/Poly/SymTable.h
+    include/Platform/Platform.h
+)
+
+add_library(EterBase STATIC
+    ${ETERBASE_SOURCES}
+    ${ETERBASE_HEADERS}
+)
 add_library(EterBase::EterBase ALIAS EterBase)
 
 target_include_directories(EterBase
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Poly>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/EterBase>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/EterBase/Poly>
         $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/Poly
 )
 
 target_link_libraries(EterBase

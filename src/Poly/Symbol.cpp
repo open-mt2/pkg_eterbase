@@ -1,4 +1,4 @@
-#include "../StdAfx.h"
+#include "StdAfx.h"
 #include "Symbol.h"
 
 CSymbol::CSymbol()

@@ -57,6 +57,31 @@ The library includes 7 automated unit tests covering all core modules:
 
 ---
 
+## Directory Structure
+
+Following modern Pitchfork / Standard C++ project layout:
+
+```text
+pkg_eterbase/
+├── CMakeLists.txt              # Dual-mode CMake configuration (standalone / submodule)
+├── README.md                   # Documentation & build instructions
+├── .github/workflows/ci.yml    # GitHub Actions matrix CI (GCC & Clang, Release & Debug)
+├── include/                    # Public API headers
+│   ├── EterBase/               # Core library public headers
+│   │   ├── ...                 # (CPostIt.h, CRC32.h, FileBase.h, lzo.h, Utils.h, etc.)
+│   │   └── Poly/               # Expression evaluator public headers (Poly.h, etc.)
+│   └── Platform/               # Platform compatibility definitions
+│       └── Platform.h
+├── src/                        # Private implementation source files
+│   ├── ...                     # (CRC32.cpp, FileBase.cpp, lzo.cpp, Utils.cpp, etc.)
+│   └── Poly/                   # (Base.cpp, Poly.cpp, Symbol.cpp, SymTable.cpp)
+└── tests/                      # Automated CTest test suite
+    ├── CMakeLists.txt
+    └── test_*.cpp
+```
+
+---
+
 ## Integration
 
 ### As a CMake Subdirectory
