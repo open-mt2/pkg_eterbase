@@ -1,0 +1,21 @@
+# Build output
+build/
+bin/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# IDE and Editor files
+.vscode/
+.clangd/
+.cache/
+compile_commands.json
+CMakeUserPresets.json
+
+# OS and Temp files
+.DS_Store
+Thumbs.db
+*~
+*.swp

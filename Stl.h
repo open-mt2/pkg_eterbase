@@ -21,6 +21,7 @@
 #include <queue>
 #include <functional>
 #include <sstream>
+#include <cstring>
 
 #pragma warning ( pop )
 
