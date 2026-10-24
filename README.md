@@ -22,12 +22,14 @@ Core foundation and systems library for the Metin2 Linux port. Provides low-leve
 ## Building
 
 ### Requirements
+
 - CMake 3.20+
 - GCC 11+ or Clang 14+ (C++17 support)
 - Ninja or Make
 - `liblzo2` development headers (`liblzo2-dev` on Debian/Ubuntu, `lzo` on Arch Linux)
 
 ### Commands
+
 ```bash
 # Configure
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
@@ -43,17 +45,19 @@ ctest --test-dir build --output-on-failure
 
 ## Test Suite
 
-The library includes 7 automated unit tests covering all core modules:
+The library includes 7 automated unit tests covering some of the core modules:
 
-| Test Target | Component | Coverage |
-| :--- | :--- | :--- |
-| `test_tea` | `tea.h` / `tea.cpp` | 128-bit key block encryption, decryption, and buffer padding |
-| `test_crc32` | `CRC32.h` / `CRC32.cpp` | Consistency, string hashes, case distinction |
-| `test_lzo` | `lzo.h` / `lzo.cpp` | Plaintext and encrypted compression/decompression |
-| `test_file` | `FileBase.h`, `MappedFile.h` | Temporary file write, read back, and POSIX `mmap()` mapping |
-| `test_stl` | `Stl.h` / `Stl.cpp` | String splitting, lowering, and character conversion |
-| `test_timer` | `Timer.h` / `Timer.cpp` | Monotonic clock advance, millisecond resolution, and delta calculation |
-| `test_poly` | `Poly.h` / `Poly.cpp` | Arithmetic order of operations, parenthesis grouping, and variables |
+| Test Target  | Component                    | Coverage                                                               |
+| :----------- | :--------------------------- | :--------------------------------------------------------------------- |
+| `test_tea`   | `tea.h` / `tea.cpp`          | 128-bit key block encryption, decryption, and buffer padding           |
+| `test_crc32` | `CRC32.h` / `CRC32.cpp`      | Consistency, string hashes, case distinction                           |
+| `test_lzo`   | `lzo.h` / `lzo.cpp`          | Plaintext and encrypted compression/decompression                      |
+| `test_file`  | `FileBase.h`, `MappedFile.h` | Temporary file write, read back, and POSIX `mmap()` mapping            |
+| `test_stl`   | `Stl.h` / `Stl.cpp`          | String splitting, lowering, and character conversion                   |
+| `test_timer` | `Timer.h` / `Timer.cpp`      | Monotonic clock advance, millisecond resolution, and delta calculation |
+| `test_poly`  | `Poly.h` / `Poly.cpp`        | Arithmetic order of operations, parenthesis grouping, and variables    |
+
+The tests are still on going and not complete yet.
 
 ---
 
@@ -85,8 +89,10 @@ pkg_eterbase/
 ## Integration
 
 ### As a CMake Subdirectory
+
 ```cmake
 add_subdirectory(extern/pkg_eterbase)
 target_link_libraries(YourTarget PRIVATE EterBase)
 ```
+
 Include paths (`EterBase`, `EterBase/Poly`, and `Platform`) are automatically exported via `EterBase`'s public interface.
