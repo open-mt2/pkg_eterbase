@@ -86,9 +86,10 @@ void Logf(UINT uLevel, const char* c_szFormat, ...)
 	va_start(args, c_szFormat);
 	_vsnprintf(szBuf, sizeof(szBuf), c_szFormat, args);
 	va_end(args);
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(__LINUX__)
 	OutputDebugString(szBuf);	
 	fputs(szBuf, stdout);
+	fflush(stdout);
 #endif
 
 	if (isLogFile)
@@ -112,9 +113,10 @@ void Lognf(UINT uLevel, const char* c_szFormat, ...)
 		szBuf[len + 1] = '\0';
 	}
 	va_end(args);
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(__LINUX__)
 	OutputDebugString(szBuf);	
 	puts(szBuf);
+	fflush(stdout);
 #endif
 
 	if (isLogFile)
@@ -124,9 +126,10 @@ void Lognf(UINT uLevel, const char* c_szFormat, ...)
 
 void Trace(const char * c_szMsg)
 {
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(__LINUX__)
 	OutputDebugString(c_szMsg);
 	printf("%s", c_szMsg);
+	fflush(stdout);
 #endif
 
 	if (isLogFile)
@@ -135,17 +138,15 @@ void Trace(const char * c_szMsg)
 
 void Tracen(const char* c_szMsg)
 {
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(__LINUX__)
 	char szBuf[DEBUG_STRING_MAX_LEN+1];
 	_snprintf(szBuf, sizeof(szBuf), "%s\n", c_szMsg);
 	OutputDebugString(szBuf);
 	puts(c_szMsg);
+	fflush(stdout);
 
 	if (isLogFile)
 		LogFile(szBuf);
-
-	puts(c_szMsg);
-	putc('\n', stdout);
 #else
 	if (isLogFile)
 	{
@@ -169,9 +170,10 @@ void Tracenf(const char* c_szFormat, ...)
 		szBuf[len + 1] = '\0';
 	}
 	va_end(args);
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(__LINUX__)
 	OutputDebugString(szBuf);	
 	printf("%s", szBuf);
+	fflush(stdout);
 #endif
 
 	if (isLogFile)
@@ -187,9 +189,10 @@ void Tracef(const char* c_szFormat, ...)
 	_vsnprintf(szBuf, sizeof(szBuf), c_szFormat, args);
 	va_end(args);
 
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(__LINUX__)
 	OutputDebugString(szBuf);	
 	fputs(szBuf, stdout);
+	fflush(stdout);
 #endif
 
 	if (isLogFile)
@@ -198,8 +201,6 @@ void Tracef(const char* c_szFormat, ...)
 
 void TraceError(const char* c_szFormat, ...)
 {
-#ifndef _DISTRIBUTE 
-
 	char szBuf[DEBUG_STRING_MAX_LEN+2];
 
 	strncpy(szBuf, "SYSERR: ", DEBUG_STRING_MAX_LEN);
@@ -225,21 +226,18 @@ void TraceError(const char* c_szFormat, ...)
 					szBuf + 8);
 	fflush(stderr);
 	
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(__LINUX__)
 	OutputDebugString(szBuf);
 	fputs(szBuf, stdout);
+	fflush(stdout);
 #endif
 
 	if (isLogFile)
 		LogFile(szBuf);
-
-#endif
 }
 
 void TraceErrorWithoutEnter(const char* c_szFormat, ...)
 {
-#ifndef _DISTRIBUTE 
-
 	char szBuf[DEBUG_STRING_MAX_LEN];
 
 	va_list args;
@@ -259,14 +257,14 @@ void TraceErrorWithoutEnter(const char* c_szFormat, ...)
 					szBuf + 8);
 	fflush(stderr);
 
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(__LINUX__)
 	OutputDebugString(szBuf);
 	fputs(szBuf, stdout);
+	fflush(stdout);
 #endif
 
 	if (isLogFile)
 		LogFile(szBuf);
-#endif
 }
 
 void LogBoxf(const char* c_szFormat, ...)
@@ -310,15 +308,15 @@ void LogFilef(const char * c_szMessage, ...)
 
 void OpenLogFile(bool bUseLogFIle)
 {
-#ifndef _DISTRIBUTE 
+#if !defined(_DISTRIBUTE) || defined(__LINUX__)
 	freopen("syserr.txt", "w", stderr);
+#endif
 
 	if (bUseLogFIle)
 	{
 		isLogFile = true;
 		CLogFile::Instance().Initialize();
 	}
-#endif
 }
 
 void OpenConsoleWindow()
