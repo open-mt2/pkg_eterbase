@@ -897,6 +897,10 @@
         GetPlatformWindowState().windowWidth = w;
         GetPlatformWindowState().windowHeight = h;
     }
+    inline void Platform_GetWindowResolution(int* w, int* h) {
+        if (w) *w = GetPlatformWindowState().windowWidth;
+        if (h) *h = GetPlatformWindowState().windowHeight;
+    }
     inline BOOL GetWindowRect(HWND, LPRECT prc) {
         if (prc) {
             prc->left = 0; prc->top = 0;
