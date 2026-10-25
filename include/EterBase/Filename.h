@@ -113,17 +113,17 @@ public:
 		}
 	}
 
-	static std::string GetName(std::string& str);           // if filename is "/idv/code/file.cpp", it returns "file"
-	static std::string GetExtension(std::string& str);      // if filename is "/idv/code/file.cpp", it returns "cpp"
-	static std::string GetPath(std::string& str);           // if filename is "/idv/code/file.cpp", it returns "/idv/code"
-	static std::string NoExtension(std::string& str);       // if filename is "/idv/code/file.cpp", it returns "/idv/code/file"
-	static std::string NoPath(std::string& str);            // if filename is "/idv/code/file.cpp", it returns "file.cpp"
+	static std::string GetName(const std::string& str);           // if filename is "/idv/code/file.cpp", it returns "file"
+	static std::string GetExtension(const std::string& str);      // if filename is "/idv/code/file.cpp", it returns "cpp"
+	static std::string GetPath(const std::string& str);           // if filename is "/idv/code/file.cpp", it returns "/idv/code"
+	static std::string NoExtension(const std::string& str);       // if filename is "/idv/code/file.cpp", it returns "/idv/code/file"
+	static std::string NoPath(const std::string& str);            // if filename is "/idv/code/file.cpp", it returns "file.cpp"
 };
 
 ///////////////////////////////////////////////////////////////////////  
 //	CFileNameHelper::GetExtension
 
-inline std::string CFileNameHelper::GetName(std::string& str)
+inline std::string CFileNameHelper::GetName(const std::string& str)
 {
 	std::string strName;
 
@@ -156,7 +156,7 @@ inline std::string CFileNameHelper::GetName(std::string& str)
 ///////////////////////////////////////////////////////////////////////  
 //	CFilenameHelper::GetExtension
 
-inline std::string CFileNameHelper::GetExtension(std::string& str)
+inline std::string CFileNameHelper::GetExtension(const std::string& str)
 {
 	std::string strExtension;
 
@@ -179,7 +179,7 @@ inline std::string CFileNameHelper::GetExtension(std::string& str)
 ///////////////////////////////////////////////////////////////////////  
 //	CFilenameHelper::GetPath
 
-inline std::string CFileNameHelper::GetPath(std::string& str)
+inline std::string CFileNameHelper::GetPath(const std::string& str)
 {
 	char szPath[1024];
 	szPath[0] = '\0';
@@ -209,7 +209,7 @@ inline std::string CFileNameHelper::GetPath(std::string& str)
 ///////////////////////////////////////////////////////////////////////  
 //	CFilenameHelper::NoExtension
 
-inline std::string CFileNameHelper::NoExtension(std::string& str)
+inline std::string CFileNameHelper::NoExtension(const std::string& str)
 {
 	std::size_t npos = str.find_last_of('.');
 
@@ -223,7 +223,7 @@ inline std::string CFileNameHelper::NoExtension(std::string& str)
 ///////////////////////////////////////////////////////////////////////  
 //	CFilenameHelper::NoPath
 
-inline std::string CFileNameHelper::NoPath(std::string& str)
+inline std::string CFileNameHelper::NoPath(const std::string& str)
 {
 	char szPath[1024];
 	szPath[0] = '\0';

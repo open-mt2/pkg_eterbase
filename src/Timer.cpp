@@ -3,15 +3,6 @@
 
 #if defined(_WIN32)
 #pragma comment(lib, "winmm.lib")
-#else
-#include <chrono>
-
-static inline DWORD timeGetTime()
-{
-	static const auto s_start = std::chrono::steady_clock::now();
-	auto now = std::chrono::steady_clock::now();
-	return (DWORD)std::chrono::duration_cast<std::chrono::milliseconds>(now - s_start).count();
-}
 #endif
 
 static DWORD gs_dwBaseTime=0;

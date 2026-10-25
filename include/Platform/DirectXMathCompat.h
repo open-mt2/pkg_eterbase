@@ -108,6 +108,16 @@ typedef DWORD D3DCOLOR;
 #define D3DFVF_TEXCOUNT_MASK    0xf00
 #define D3DFVF_TEXCOUNT_SHIFT   8
 
+#define D3DFVF_TEXTUREFORMAT2 0
+#define D3DFVF_TEXTUREFORMAT1 3
+#define D3DFVF_TEXTUREFORMAT3 1
+#define D3DFVF_TEXTUREFORMAT4 2
+
+#define D3DFVF_TEXCOORDSIZE2(CoordIndex) (D3DFVF_TEXTUREFORMAT2 << (CoordIndex*2 + 16))
+#define D3DFVF_TEXCOORDSIZE3(CoordIndex) (D3DFVF_TEXTUREFORMAT3 << (CoordIndex*2 + 16))
+#define D3DFVF_TEXCOORDSIZE4(CoordIndex) (D3DFVF_TEXTUREFORMAT4 << (CoordIndex*2 + 16))
+#define D3DFVF_TEXCOORDSIZE1(CoordIndex) (D3DFVF_TEXTUREFORMAT1 << (CoordIndex*2 + 16))
+
 // D3DUSAGE & D3DLOCK Flags
 #define D3DUSAGE_RENDERTARGET       0x00000001L
 #define D3DUSAGE_DEPTHSTENCIL       0x00000002L
@@ -163,7 +173,11 @@ typedef enum _D3DFORMAT {
     D3DFMT_X1R5G5B5     = 24,
     D3DFMT_A1R5G5B5     = 25,
     D3DFMT_A4R4G4B4     = 26,
+    D3DFMT_R3G3B2       = 27,
     D3DFMT_A8           = 28,
+    D3DFMT_A8R3G3B2     = 29,
+    D3DFMT_X4R4G4B4     = 30,
+    D3DFMT_A2B10G10R10  = 31,
     D3DFMT_DXT1         = MAKEFOURCC('D', 'X', 'T', '1'),
     D3DFMT_DXT2         = MAKEFOURCC('D', 'X', 'T', '2'),
     D3DFMT_DXT3         = MAKEFOURCC('D', 'X', 'T', '3'),
@@ -314,6 +328,12 @@ typedef enum _D3DTEXTURESTAGESTATETYPE {
     D3DTSS_ALPHAARG0             = 27,
     D3DTSS_RESULTARG             = 28
 } D3DTEXTURESTAGESTATETYPE;
+
+#define D3DTSS_TCI_PASSTHRU                    0x00000000
+#define D3DTSS_TCI_CAMERASPACENORMAL           0x00010000
+#define D3DTSS_TCI_CAMERASPACEPOSITION         0x00020000
+#define D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR 0x00030000
+#define D3DTSS_TCI_SPHEREMAP                   0x00040000
 
 typedef enum _D3DSAMPLERSTATETYPE {
     D3DSAMP_ADDRESSU      = 1,
@@ -670,6 +690,15 @@ struct D3DXCOLOR {
     bool operator != (const D3DXCOLOR& c) const { return !(*this == c); }
 };
 
+inline D3DXCOLOR* D3DXColorModulate(D3DXCOLOR* pOut, const D3DXCOLOR* pC1, const D3DXCOLOR* pC2) {
+    if (!pOut || !pC1 || !pC2) return pOut;
+    pOut->r = pC1->r * pC2->r;
+    pOut->g = pC1->g * pC2->g;
+    pOut->b = pC1->b * pC2->b;
+    pOut->a = pC1->a * pC2->a;
+    return pOut;
+}
+
 struct D3DXMATRIX : public D3DMATRIX {
     D3DXMATRIX() {
         _11 = 1.0f; _12 = 0.0f; _13 = 0.0f; _14 = 0.0f;
@@ -863,6 +892,27 @@ typedef struct _D3DCAPS9 {
     DWORD      DevCaps2;
 } D3DCAPS9;
 
+#define D3DCAPS2_FULLSCREENGAMMA 0x00020000L
+#define D3DSGR_NO_CALIBRATION    0x00000000L
+#define D3DBACKBUFFER_TYPE_MONO  0
+
+typedef struct _D3DGAMMARAMP {
+    WORD red[256];
+    WORD green[256];
+    WORD blue[256];
+} D3DGAMMARAMP;
+
+typedef struct _D3DSURFACE_DESC {
+    D3DFORMAT           Format;
+    D3DRESOURCETYPE     Type;
+    DWORD               Usage;
+    D3DPOOL             Pool;
+    D3DMULTISAMPLE_TYPE MultiSampleType;
+    DWORD               MultiSampleQuality;
+    UINT                Width;
+    UINT                Height;
+} D3DSURFACE_DESC;
+
 typedef struct _D3DLOCKED_RECT {
     INT   Pitch;
     void* pBits;
@@ -898,6 +948,27 @@ inline float D3DXVec2Dot(const D3DXVECTOR2* pV1, const D3DXVECTOR2* pV2) {
 inline float D3DXVec2CCW(const D3DXVECTOR2* pV1, const D3DXVECTOR2* pV2) {
     if (!pV1 || !pV2) return 0.0f;
     return pV1->x * pV2->y - pV1->y * pV2->x;
+}
+
+inline D3DXVECTOR2* D3DXVec2Add(D3DXVECTOR2* pOut, const D3DXVECTOR2* pV1, const D3DXVECTOR2* pV2) {
+    if (!pOut || !pV1 || !pV2) return nullptr;
+    pOut->x = pV1->x + pV2->x;
+    pOut->y = pV1->y + pV2->y;
+    return pOut;
+}
+
+inline D3DXVECTOR2* D3DXVec2Subtract(D3DXVECTOR2* pOut, const D3DXVECTOR2* pV1, const D3DXVECTOR2* pV2) {
+    if (!pOut || !pV1 || !pV2) return nullptr;
+    pOut->x = pV1->x - pV2->x;
+    pOut->y = pV1->y - pV2->y;
+    return pOut;
+}
+
+inline D3DXVECTOR2* D3DXVec2Scale(D3DXVECTOR2* pOut, const D3DXVECTOR2* pV, float s) {
+    if (!pOut || !pV) return nullptr;
+    pOut->x = pV->x * s;
+    pOut->y = pV->y * s;
+    return pOut;
 }
 
 inline D3DXVECTOR2* D3DXVec2Normalize(D3DXVECTOR2* pOut, const D3DXVECTOR2* pV) {
@@ -939,6 +1010,38 @@ inline D3DXVECTOR3* D3DXVec3Cross(D3DXVECTOR3* pOut, const D3DXVECTOR3* pV1, con
     return pOut;
 }
 
+inline D3DXVECTOR3* D3DXVec3Add(D3DXVECTOR3* pOut, const D3DXVECTOR3* pV1, const D3DXVECTOR3* pV2) {
+    if (!pOut || !pV1 || !pV2) return nullptr;
+    pOut->x = pV1->x + pV2->x;
+    pOut->y = pV1->y + pV2->y;
+    pOut->z = pV1->z + pV2->z;
+    return pOut;
+}
+
+inline D3DXVECTOR3* D3DXVec3Subtract(D3DXVECTOR3* pOut, const D3DXVECTOR3* pV1, const D3DXVECTOR3* pV2) {
+    if (!pOut || !pV1 || !pV2) return nullptr;
+    pOut->x = pV1->x - pV2->x;
+    pOut->y = pV1->y - pV2->y;
+    pOut->z = pV1->z - pV2->z;
+    return pOut;
+}
+
+inline D3DXVECTOR3* D3DXVec3Scale(D3DXVECTOR3* pOut, const D3DXVECTOR3* pV, float s) {
+    if (!pOut || !pV) return nullptr;
+    pOut->x = pV->x * s;
+    pOut->y = pV->y * s;
+    pOut->z = pV->z * s;
+    return pOut;
+}
+
+inline D3DXVECTOR3* D3DXVec3Lerp(D3DXVECTOR3* pOut, const D3DXVECTOR3* pV1, const D3DXVECTOR3* pV2, float s) {
+    if (!pOut || !pV1 || !pV2) return nullptr;
+    pOut->x = pV1->x + s * (pV2->x - pV1->x);
+    pOut->y = pV1->y + s * (pV2->y - pV1->y);
+    pOut->z = pV1->z + s * (pV2->z - pV1->z);
+    return pOut;
+}
+
 inline D3DXVECTOR3* D3DXVec3Normalize(D3DXVECTOR3* pOut, const D3DXVECTOR3* pV) {
     if (!pOut || !pV) return nullptr;
     float len = D3DXVec3Length(pV);
@@ -966,6 +1069,26 @@ inline D3DXVECTOR3* D3DXVec3TransformCoord(D3DXVECTOR3* pOut, const D3DXVECTOR3*
         x *= invW; y *= invW; z *= invW;
     }
     pOut->x = x; pOut->y = y; pOut->z = z;
+    return pOut;
+}
+
+inline D3DXVECTOR4* D3DXVec3Transform(D3DXVECTOR4* pOut, const D3DXVECTOR3* pV, const D3DXMATRIX* pM) {
+    if (!pOut || !pV || !pM) return nullptr;
+    float x = pV->x * pM->_11 + pV->y * pM->_21 + pV->z * pM->_31 + pM->_41;
+    float y = pV->x * pM->_12 + pV->y * pM->_22 + pV->z * pM->_32 + pM->_42;
+    float z = pV->x * pM->_13 + pV->y * pM->_23 + pV->z * pM->_33 + pM->_43;
+    float w = pV->x * pM->_14 + pV->y * pM->_24 + pV->z * pM->_34 + pM->_44;
+    pOut->x = x; pOut->y = y; pOut->z = z; pOut->w = w;
+    return pOut;
+}
+
+inline D3DXVECTOR4* D3DXVec4Transform(D3DXVECTOR4* pOut, const D3DXVECTOR4* pV, const D3DXMATRIX* pM) {
+    if (!pOut || !pV || !pM) return nullptr;
+    float x = pV->x * pM->_11 + pV->y * pM->_21 + pV->z * pM->_31 + pV->w * pM->_41;
+    float y = pV->x * pM->_12 + pV->y * pM->_22 + pV->z * pM->_32 + pV->w * pM->_42;
+    float z = pV->x * pM->_13 + pV->y * pM->_23 + pV->z * pM->_33 + pV->w * pM->_43;
+    float w = pV->x * pM->_14 + pV->y * pM->_24 + pV->z * pM->_34 + pV->w * pM->_44;
+    pOut->x = x; pOut->y = y; pOut->z = z; pOut->w = w;
     return pOut;
 }
 
@@ -1262,6 +1385,44 @@ inline D3DXVECTOR3* D3DXVec3Unproject(
     return D3DXVec3TransformCoord(pOut, &v, &invMat);
 }
 
+inline D3DXQUATERNION* D3DXQuaternionIdentity(D3DXQUATERNION* pOut) {
+    if (!pOut) return nullptr;
+    pOut->x = 0.0f; pOut->y = 0.0f; pOut->z = 0.0f; pOut->w = 1.0f;
+    return pOut;
+}
+
+inline D3DXQUATERNION* D3DXQuaternionRotationAxis(D3DXQUATERNION* pOut, const D3DXVECTOR3* pV, float Angle) {
+    if (!pOut || !pV) return nullptr;
+    D3DXVECTOR3 v;
+    D3DXVec3Normalize(&v, pV);
+    float halfAngle = Angle * 0.5f;
+    float sinHalf = sinf(halfAngle);
+    pOut->x = v.x * sinHalf;
+    pOut->y = v.y * sinHalf;
+    pOut->z = v.z * sinHalf;
+    pOut->w = cosf(halfAngle);
+    return pOut;
+}
+
+inline D3DXQUATERNION* D3DXQuaternionRotationYawPitchRoll(D3DXQUATERNION* pOut, float Yaw, float Pitch, float Roll) {
+    if (!pOut) return nullptr;
+    float halfYaw = Yaw * 0.5f;
+    float halfPitch = Pitch * 0.5f;
+    float halfRoll = Roll * 0.5f;
+    float cosYaw = std::cos(halfYaw);
+    float sinYaw = std::sin(halfYaw);
+    float cosPitch = std::cos(halfPitch);
+    float sinPitch = std::sin(halfPitch);
+    float cosRoll = std::cos(halfRoll);
+    float sinRoll = std::sin(halfRoll);
+
+    pOut->x = cosYaw * sinPitch * cosRoll + sinYaw * cosPitch * sinRoll;
+    pOut->y = sinYaw * cosPitch * cosRoll - cosYaw * sinPitch * sinRoll;
+    pOut->z = cosYaw * cosPitch * sinRoll - sinYaw * sinPitch * cosRoll;
+    pOut->w = cosYaw * cosPitch * cosRoll + sinYaw * sinPitch * sinRoll;
+    return pOut;
+}
+
 inline D3DXQUATERNION* D3DXQuaternionConjugate(D3DXQUATERNION* pOut, const D3DXQUATERNION* pQ) {
     if (!pOut || !pQ) return nullptr;
     pOut->x = -pQ->x; pOut->y = -pQ->y; pOut->z = -pQ->z; pOut->w = pQ->w;
@@ -1438,6 +1599,15 @@ public:
         return S_OK;
     }
     HRESULT UnlockRect() { return S_OK; }
+    HRESULT GetDesc(D3DSURFACE_DESC* pDesc) {
+        if (!pDesc) return E_INVALIDARG;
+        std::memset(pDesc, 0, sizeof(D3DSURFACE_DESC));
+        pDesc->Format = D3DFMT_A8R8G8B8;
+        pDesc->Type = D3DRTYPE_SURFACE;
+        pDesc->Width = m_width;
+        pDesc->Height = m_height;
+        return S_OK;
+    }
     UINT GetWidth() const { return m_width; }
     UINT GetHeight() const { return m_height; }
 private:
@@ -1447,7 +1617,10 @@ private:
 };
 typedef IDirect3DSurface9* LPDIRECT3DSURFACE9;
 
-class IDirect3DBaseTexture9 : public IDirect3DResource9 {};
+class IDirect3DBaseTexture9 : public IDirect3DResource9 {
+public:
+    virtual DWORD GetLevelCount() { return 1; }
+};
 typedef IDirect3DBaseTexture9* LPDIRECT3DBASETEXTURE9;
 
 class IDirect3DTexture9 : public IDirect3DBaseTexture9 {
@@ -1578,11 +1751,18 @@ public:
         pCaps->MaxAnisotropy = 16;
         pCaps->DevCaps = D3DDEVCAPS_HWTRANSFORMANDLIGHT;
         pCaps->VertexProcessingCaps = D3DVTXPCAPS_DIRECTIONALLIGHTS | D3DVTXPCAPS_POSITIONALLIGHTS | D3DVTXPCAPS_TEXGEN;
+        pCaps->Caps2 = D3DCAPS2_FULLSCREENGAMMA;
         pCaps->PrimitiveMiscCaps = D3DPMISCCAPS_CLIPTLVERTS;
         pCaps->TextureAddressCaps = D3DPTADDRESSCAPS_BORDER;
         pCaps->VertexShaderVersion = D3DVS_VERSION(2, 0);
         return S_OK;
     }
+    HRESULT GetBackBuffer(UINT /*iSwapChain*/, UINT /*BackBuffer*/, DWORD /*Type*/, IDirect3DSurface9** ppBackBuffer) {
+        if (!ppBackBuffer) return E_INVALIDARG;
+        *ppBackBuffer = new IDirect3DSurface9(m_viewport.Width, m_viewport.Height);
+        return S_OK;
+    }
+    void SetGammaRamp(UINT /*iSwapChain*/, DWORD /*Flags*/, const D3DGAMMARAMP* /*pRamp*/) {}
     HRESULT GetRenderTarget(DWORD, IDirect3DSurface9** ppRenderTarget) {
         if (!ppRenderTarget) return E_INVALIDARG;
         *ppRenderTarget = new IDirect3DSurface9(m_viewport.Width, m_viewport.Height);

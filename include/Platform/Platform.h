@@ -31,6 +31,8 @@
     #include <netdb.h>
     #include <errno.h>
     #include <time.h>
+    #include <string>
+    #include <glob.h>
 
     // Basic Win32 Scalar Types
     typedef uint32_t      DWORD;
@@ -48,6 +50,13 @@
     typedef int64_t       __int64;
     typedef float         FLOAT;
     typedef void          VOID;
+
+    #ifndef IN
+        #define IN
+    #endif
+    #ifndef OUT
+        #define OUT
+    #endif
     typedef char          CHAR;
     typedef wchar_t       WCHAR;
     typedef char          TCHAR;
@@ -95,6 +104,17 @@
     #endif
     #ifndef MAKELONG
     #define MAKELONG(a, b) ((LONG)(((WORD)(((DWORD_PTR)(a)) & 0xffff)) | ((DWORD)((WORD)(((DWORD_PTR)(b)) & 0xffff))) << 16))
+    #endif
+
+    #ifndef UNREFERENCED_PARAMETER
+    #define UNREFERENCED_PARAMETER(P) ((void)(P))
+    #endif
+
+    #ifndef __min
+    #define __min(a, b) (((a) < (b)) ? (a) : (b))
+    #endif
+    #ifndef __max
+    #define __max(a, b) (((a) > (b)) ? (a) : (b))
     #endif
 
     typedef union _LARGE_INTEGER {
@@ -210,6 +230,13 @@
     #ifndef MB_TOPMOST
         #define MB_TOPMOST 0x00040000L
     #endif
+    #ifndef MB_ICONSTOP
+        #define MB_ICONSTOP         0x00000010L
+        #define MB_ICONERROR        0x00000010L
+        #define MB_ICONQUESTION     0x00000020L
+        #define MB_ICONWARNING      0x00000030L
+        #define MB_ICONINFORMATION  0x00000040L
+    #endif
     #ifndef IDOK
         #define IDOK 1
     #endif
@@ -217,6 +244,21 @@
     inline int MessageBoxA(HWND, LPCSTR, LPCSTR, UINT) { return IDOK; }
     #ifndef MessageBox
         #define MessageBox MessageBoxA
+    #endif
+
+    inline DWORD GetModuleFileNameA(HMODULE, LPSTR lpFilename, DWORD nSize) {
+        if (!lpFilename || nSize == 0) return 0;
+        ssize_t len = readlink("/proc/self/exe", lpFilename, nSize - 1);
+        if (len != -1) {
+            lpFilename[len] = '\0';
+            return (DWORD)len;
+        }
+        strncpy(lpFilename, "metin2client", nSize - 1);
+        lpFilename[nSize - 1] = '\0';
+        return (DWORD)strlen(lpFilename);
+    }
+    #ifndef GetModuleFileName
+        #define GetModuleFileName GetModuleFileNameA
     #endif
     inline void OutputDebugStringA(LPCSTR) {}
     inline void OutputDebugStringW(LPCWSTR) {}
@@ -237,6 +279,7 @@
     // Calling Conventions & Compiler Attributes
     #define CALLBACK
     #define WINAPI
+    #define APIENTRY
     #define __stdcall
     #define __cdecl
     #ifndef __forceinline
@@ -269,6 +312,9 @@
     #ifndef stricmp
         #define stricmp strcasecmp
     #endif
+    #ifndef strcmpi
+        #define strcmpi strcasecmp
+    #endif
     #ifndef _strnicmp
         #define _strnicmp strncasecmp
     #endif
@@ -295,6 +341,47 @@
     #endif
     #ifndef _alloca
         #define _alloca alloca
+    #endif
+    #ifndef lstrlenA
+        #define lstrlenA strlen
+    #endif
+    #ifndef lstrlen
+        #define lstrlen strlen
+    #endif
+
+    inline DWORD GetCurrentDirectoryA(DWORD nBufferLength, LPSTR lpBuffer) {
+        if (!lpBuffer || nBufferLength == 0) return 0;
+        if (getcwd(lpBuffer, nBufferLength) == nullptr) return 0;
+        return (DWORD)strlen(lpBuffer);
+    }
+    #ifndef GetCurrentDirectory
+        #define GetCurrentDirectory GetCurrentDirectoryA
+    #endif
+
+    inline BOOL MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName) {
+        return rename(lpExistingFileName, lpNewFileName) == 0 ? TRUE : FALSE;
+    }
+    #ifndef MoveFile
+        #define MoveFile MoveFileA
+    #endif
+
+    inline int LoadStringA(HINSTANCE, UINT, LPSTR, int) { return 0; }
+    #ifndef LoadString
+        #define LoadString LoadStringA
+    #endif
+
+    inline DWORD GetPrivateProfileStringA(LPCSTR /*lpAppName*/, LPCSTR /*lpKeyName*/, LPCSTR lpDefault, LPSTR lpReturnedString, DWORD nSize, LPCSTR /*lpFileName*/) {
+        if (!lpReturnedString || nSize == 0) return 0;
+        if (lpDefault) {
+            strncpy(lpReturnedString, lpDefault, nSize - 1);
+            lpReturnedString[nSize - 1] = '\0';
+            return (DWORD)strlen(lpReturnedString);
+        }
+        lpReturnedString[0] = '\0';
+        return 0;
+    }
+    #ifndef GetPrivateProfileString
+        #define GetPrivateProfileString GetPrivateProfileStringA
     #endif
 
     // Structs
@@ -327,6 +414,59 @@
         char cFileName[MAX_PATH];
     } WIN32_FIND_DATAA, *PWIN32_FIND_DATAA, *LPWIN32_FIND_DATAA;
     typedef WIN32_FIND_DATAA WIN32_FIND_DATA;
+
+    struct PlatformFindFileData {
+        glob_t glob_res;
+        size_t index;
+    };
+
+    inline HANDLE FindFirstFileA(const char* lpFileName, LPWIN32_FIND_DATAA lpFindFileData) {
+        if (!lpFileName || !lpFindFileData) return INVALID_HANDLE_VALUE;
+        PlatformFindFileData* pfd = new PlatformFindFileData();
+        pfd->index = 0;
+        std::string pattern = lpFileName;
+        for (char &c : pattern) { if (c == '\\') c = '/'; }
+        if (glob(pattern.c_str(), 0, nullptr, &pfd->glob_res) != 0 || pfd->glob_res.gl_pathc == 0) {
+            delete pfd;
+            return INVALID_HANDLE_VALUE;
+        }
+        const char* p = pfd->glob_res.gl_pathv[0];
+        const char* slash = strrchr(p, '/');
+        const char* fname = slash ? (slash + 1) : p;
+        strncpy(lpFindFileData->cFileName, fname, MAX_PATH - 1);
+        lpFindFileData->cFileName[MAX_PATH - 1] = '\0';
+        lpFindFileData->dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
+        return (HANDLE)(intptr_t)pfd;
+    }
+
+    inline BOOL FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData) {
+        if (!hFindFile || hFindFile == INVALID_HANDLE_VALUE || !lpFindFileData) return FALSE;
+        PlatformFindFileData* pfd = (PlatformFindFileData*)(intptr_t)hFindFile;
+        pfd->index++;
+        if (pfd->index >= pfd->glob_res.gl_pathc) return FALSE;
+        const char* p = pfd->glob_res.gl_pathv[pfd->index];
+        const char* slash = strrchr(p, '/');
+        const char* fname = slash ? (slash + 1) : p;
+        strncpy(lpFindFileData->cFileName, fname, MAX_PATH - 1);
+        lpFindFileData->cFileName[MAX_PATH - 1] = '\0';
+        lpFindFileData->dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
+        return TRUE;
+    }
+
+    inline BOOL FindClose(HANDLE hFindFile) {
+        if (!hFindFile || hFindFile == INVALID_HANDLE_VALUE) return FALSE;
+        PlatformFindFileData* pfd = (PlatformFindFileData*)(intptr_t)hFindFile;
+        globfree(&pfd->glob_res);
+        delete pfd;
+        return TRUE;
+    }
+
+    #ifndef FindFirstFile
+        #define FindFirstFile FindFirstFileA
+    #endif
+    #ifndef FindNextFile
+        #define FindNextFile FindNextFileA
+    #endif
 
     // ========================================================
     // Threading, Critical Section & Semaphore (POSIX pthreads)
@@ -513,6 +653,19 @@
         return FALSE;
     }
 
+    typedef struct _SECURITY_ATTRIBUTES {
+        DWORD  nLength;
+        LPVOID lpSecurityDescriptor;
+        BOOL   bInheritHandle;
+    } SECURITY_ATTRIBUTES, *PSECURITY_ATTRIBUTES, *LPSECURITY_ATTRIBUTES;
+
+    inline HANDLE CreateMutexA(LPSECURITY_ATTRIBUTES, BOOL, LPCSTR) { return (HANDLE)(intptr_t)1; }
+    #ifndef CreateMutex
+        #define CreateMutex CreateMutexA
+    #endif
+    inline BOOL ReleaseMutex(HANDLE) { return TRUE; }
+    inline HANDLE GetCurrentProcess() { return (HANDLE)(intptr_t)getpid(); }
+
     // ========================================================
     // Networking Compatibility (Winsock -> POSIX BSD Sockets)
     // ========================================================
@@ -605,30 +758,88 @@
         #define WM_CLOSE       0x0010
         #define WM_QUIT        0x0012
         #define WM_ACTIVATEAPP 0x001C
+        #define WM_SETCURSOR   0x0020
+        #define WM_INPUTLANGCHANGE      0x0051
         #define WM_KEYDOWN     0x0100
         #define WM_KEYUP       0x0101
         #define WM_CHAR        0x0102
+        #define WM_SYSKEYDOWN  0x0104
+        #define WM_SYSKEYUP    0x0105
+        #define WM_IME_STARTCOMPOSITION 0x010D
+        #define WM_IME_ENDCOMPOSITION   0x010E
+        #define WM_IME_COMPOSITION      0x010F
+        #define WM_IME_KEYLAST          0x010F
+        #define WM_MOUSEMOVE   0x0200
+        #define WM_LBUTTONDOWN 0x0201
+        #define WM_LBUTTONUP   0x0202
+        #define WM_RBUTTONDOWN 0x0204
+        #define WM_RBUTTONUP   0x0205
+        #define WM_MBUTTONDOWN 0x0207
+        #define WM_MBUTTONUP   0x0208
+        #define WM_MOUSEWHEEL  0x020A
+        #define WM_EXITSIZEMOVE 0x0232
+        #define WM_IME_SETCONTEXT       0x0281
+        #define WM_IME_NOTIFY           0x0282
+        #define WM_IME_CONTROL          0x0283
+        #define WM_IME_COMPOSITIONFULL  0x0284
+        #define WM_IME_SELECT           0x0285
+        #define WM_IME_CHAR             0x0286
+        #define WM_IME_REQUEST          0x0288
+        #define WM_IME_KEYDOWN          0x0290
+        #define WM_IME_KEYUP            0x0291
+
+        #define ISC_SHOWUICOMPOSITIONWINDOW     0x80000000
+        #define ISC_SHOWUIALLCANDIDATEWINDOW    0x0000000F
     #endif
 
     #define WA_INACTIVE    0
     #define WA_ACTIVE      1
     #define WA_CLICKACTIVE 2
+    #define SIZE_RESTORED  0
     #define SIZE_MINIMIZED 1
+    #define SIZE_MAXIMIZED 2
 
+    #define WS_OVERLAPPED       0x00000000L
+    #define WS_POPUP            0x80000000L
+    #define WS_CHILD            0x40000000L
+    #define WS_MINIMIZE         0x20000000L
+    #define WS_VISIBLE          0x10000000L
+    #define WS_DISABLED         0x08000000L
+    #define WS_CLIPSIBLINGS     0x04000000L
+    #define WS_CLIPCHILDREN     0x02000000L
+    #define WS_MAXIMIZE         0x01000000L
+    #define WS_CAPTION          0x00C00000L
+    #define WS_BORDER           0x00800000L
+    #define WS_DLGFRAME         0x00400000L
+    #define WS_VSCROLL          0x00200000L
+    #define WS_HSCROLL          0x00100000L
+    #define WS_SYSMENU          0x00080000L
+    #define WS_THICKFRAME       0x00040000L
+    #define WS_GROUP            0x00020000L
+    #define WS_TABSTOP          0x00010000L
+    #define WS_MINIMIZEBOX      0x00020000L
+    #define WS_MAXIMIZEBOX      0x00010000L
     #define WS_OVERLAPPEDWINDOW 0x00CF0000L
+
     #define SW_HIDE             0
     #define SW_SHOW             5
+    #define SW_MINIMIZE         6
     #define SWP_NOSIZE          0x0001
     #define SWP_NOMOVE          0x0002
     #define SWP_NOZORDER        0x0004
     #define SWP_SHOWWINDOW      0x0040
+    #define HWND_TOP            ((HWND)(intptr_t)0)
+    #define HWND_BOTTOM         ((HWND)(intptr_t)1)
     #define HWND_TOPMOST        ((HWND)(intptr_t)-1)
+    #define HWND_NOTOPMOST      ((HWND)(intptr_t)-2)
     #define GWL_USERDATA        (-21)
     #define GWLP_USERDATA       (-21)
     #define GWL_STYLE           (-16)
     #define GWL_EXSTYLE         (-20)
     #define SM_CXSCREEN         0
     #define SM_CYSCREEN         1
+    #define SM_CXFULLSCREEN     16
+    #define SM_CYFULLSCREEN     17
     #define PM_REMOVE           0x0001
     #define PM_NOREMOVE         0x0000
     #define BLACK_BRUSH         4
@@ -697,6 +908,88 @@
     inline LRESULT DispatchMessageA(const MSG*) { return 0; }
     #define DispatchMessage DispatchMessageA
     inline void PostQuitMessage(int) {}
+    inline SHORT GetKeyState(int /*nVirtKey*/) { return 0; }
+    inline SHORT GetAsyncKeyState(int /*vKey*/) { return 0; }
+    inline BOOL ClientToScreen(HWND /*hWnd*/, LPPOINT /*lpPoint*/) { return TRUE; }
+    inline HANDLE LoadImageA(HINSTANCE, LPCSTR, UINT, int, int, UINT) { return (HANDLE)(intptr_t)1; }
+    #ifndef LoadImage
+        #define LoadImage LoadImageA
+    #endif
+    inline DWORD GetLastError() { return 0; }
+    inline void SetLastError(DWORD) {}
+    inline HWND FindWindowA(LPCSTR, LPCSTR) { return nullptr; }
+    #ifndef FindWindow
+        #define FindWindow FindWindowA
+    #endif
+
+    struct STICKYKEYS {
+        DWORD cbSize;
+        DWORD dwFlags;
+    };
+    #define SPI_GETSTICKYKEYS   0x003A
+    #define SPI_SETSTICKYKEYS   0x003B
+    #define SKF_AVAILABLE       0x00000002
+    #define SKF_HOTKEYACTIVE    0x00000004
+
+    inline BOOL SystemParametersInfoA(UINT, UINT, PVOID, UINT) { return TRUE; }
+    #ifndef SystemParametersInfo
+        #define SystemParametersInfo SystemParametersInfoA
+    #endif
+
+    inline HWND SetCapture(HWND) { return (HWND)0; }
+    inline BOOL ReleaseCapture() { return TRUE; }
+    inline HWND GetCapture() { return (HWND)0; }
+
+    typedef struct _devicemodeA {
+        BYTE  dmDeviceName[32];
+        WORD  dmSpecVersion;
+        WORD  dmDriverVersion;
+        WORD  dmSize;
+        WORD  dmDriverExtra;
+        DWORD dmFields;
+        short dmOrientation;
+        short dmPaperSize;
+        short dmPaperLength;
+        short dmPaperWidth;
+        short dmScale;
+        short dmCopies;
+        short dmDefaultSource;
+        short dmPrintQuality;
+        short dmColor;
+        short dmDuplex;
+        short dmYResolution;
+        short dmTTOption;
+        short dmCollate;
+        BYTE  dmFormName[32];
+        WORD  dmLogPixels;
+        DWORD dmBitsPerPel;
+        DWORD dmPelsWidth;
+        DWORD dmPelsHeight;
+        DWORD dmDisplayFlags;
+        DWORD dmDisplayFrequency;
+        DWORD dmICMMethod;
+        DWORD dmICMIntent;
+        DWORD dmMediaType;
+        DWORD dmDitherType;
+        DWORD dmReserved1;
+        DWORD dmReserved2;
+        DWORD dmPanningWidth;
+        DWORD dmPanningHeight;
+    } DEVMODEA, *PDEVMODEA, *LPDEVMODEA;
+    typedef DEVMODEA DEVMODE;
+
+    #define DM_BITSPERPEL       0x00040000L
+    #define DM_PELSWIDTH        0x00080000L
+    #define DM_PELSHEIGHT       0x00100000L
+    #define CDS_FULLSCREEN      0x00000004
+    #define DISP_CHANGE_SUCCESSFUL 0
+    #define DISP_CHANGE_RESTART    1
+    #define DISP_CHANGE_FAILED    -1
+
+    inline LONG ChangeDisplaySettingsA(DEVMODEA*, DWORD) { return DISP_CHANGE_SUCCESSFUL; }
+    #ifndef ChangeDisplaySettings
+        #define ChangeDisplaySettings ChangeDisplaySettingsA
+    #endif
 
     // GDI & Font Definitions
     #define BI_RGB             0L
@@ -937,6 +1230,10 @@
         #define GetCurrentTime() GetTickCount()
     #endif
 
+    #ifndef timeGetTime
+        inline DWORD timeGetTime() { return GetTickCount(); }
+    #endif
+
     inline BOOL FreeLibrary(HMODULE) { return TRUE; }
 
     #define LOCALE_SABBREVLANGNAME      0x00000003
@@ -991,6 +1288,267 @@
     }
     #ifndef CreateDirectory
         #define CreateDirectory CreateDirectoryA
+    #endif
+
+    // Timer & Multimedia Helpers
+    struct TIMECAPS {
+        UINT wPeriodMin;
+        UINT wPeriodMax;
+    };
+    #define TIMERR_NOERROR 0
+    inline UINT timeGetDevCaps(TIMECAPS* ptc, UINT) {
+        if (ptc) { ptc->wPeriodMin = 1; ptc->wPeriodMax = 1000; }
+        return TIMERR_NOERROR;
+    }
+    inline UINT timeBeginPeriod(UINT) { return TIMERR_NOERROR; }
+    inline UINT timeEndPeriod(UINT) { return TIMERR_NOERROR; }
+
+    // COM Stubs
+    inline HRESULT CoInitialize(void*) { return S_OK; }
+    inline void CoUninitialize() {}
+
+    #ifndef FAR
+        #define FAR
+    #endif
+
+    // Cursor and File Attribute Helpers
+    #ifndef IMAGE_CURSOR
+        #define IMAGE_CURSOR 2
+    #endif
+    #ifndef LR_VGACOLOR
+        #define LR_VGACOLOR 0x0001
+    #endif
+    #ifndef FILE_ATTRIBUTE_NORMAL
+        #define FILE_ATTRIBUTE_NORMAL 0x00000080
+    #endif
+    #ifndef FILE_ATTRIBUTE_READONLY
+        #define FILE_ATTRIBUTE_READONLY 0x00000001
+    #endif
+
+    inline BOOL DestroyCursor(HCURSOR) { return TRUE; }
+    inline int ShowCursor(BOOL) { return 0; }
+    inline HCURSOR SetCursor(HCURSOR) { return nullptr; }
+    inline BOOL SetCursorPos(int, int) { return TRUE; }
+    inline BOOL SetFileAttributes(LPCSTR, DWORD) { return TRUE; }
+
+    // Windows Virtual Key Definitions
+    #ifndef VK_LBUTTON
+    #define VK_LBUTTON        0x01
+    #define VK_RBUTTON        0x02
+    #define VK_CANCEL         0x03
+    #define VK_MBUTTON        0x04
+    #define VK_BACK           0x08
+    #define VK_TAB            0x09
+    #define VK_CLEAR          0x0C
+    #define VK_RETURN         0x0D
+    #define VK_SHIFT          0x10
+    #define VK_CONTROL        0x11
+    #define VK_MENU           0x12
+    #define VK_PAUSE          0x13
+    #define VK_CAPITAL        0x14
+    #define VK_ESCAPE         0x1B
+    #define VK_SPACE          0x20
+    #define VK_PRIOR          0x21
+    #define VK_NEXT           0x22
+    #define VK_END            0x23
+    #define VK_HOME           0x24
+    #define VK_LEFT           0x25
+    #define VK_UP             0x26
+    #define VK_RIGHT          0x27
+    #define VK_DOWN           0x28
+    #define VK_SELECT         0x29
+    #define VK_PRINT          0x2A
+    #define VK_EXECUTE        0x2B
+    #define VK_SNAPSHOT       0x2C
+    #define VK_INSERT         0x2D
+    #define VK_DELETE         0x2E
+    #define VK_HELP           0x2F
+    #define VK_LWIN           0x5B
+    #define VK_RWIN           0x5C
+    #define VK_APPS           0x5D
+    #define VK_NUMPAD0        0x60
+    #define VK_NUMPAD1        0x61
+    #define VK_NUMPAD2        0x62
+    #define VK_NUMPAD3        0x63
+    #define VK_NUMPAD4        0x64
+    #define VK_NUMPAD5        0x65
+    #define VK_NUMPAD6        0x66
+    #define VK_NUMPAD7        0x67
+    #define VK_NUMPAD8        0x68
+    #define VK_NUMPAD9        0x69
+    #define VK_MULTIPLY       0x6A
+    #define VK_ADD            0x6B
+    #define VK_SEPARATOR      0x6C
+    #define VK_SUBTRACT       0x6D
+    #define VK_DECIMAL        0x6E
+    #define VK_DIVIDE         0x6F
+    #define VK_F1             0x70
+    #define VK_F2             0x71
+    #define VK_F3             0x72
+    #define VK_F4             0x73
+    #define VK_F5             0x74
+    #define VK_F6             0x75
+    #define VK_F7             0x76
+    #define VK_F8             0x77
+    #define VK_F9             0x78
+    #define VK_F10            0x79
+    #define VK_F11            0x7A
+    #define VK_F12            0x7B
+    #define VK_SCROLL         0x91
+    #define VK_LSHIFT         0xA0
+    #define VK_RSHIFT         0xA1
+    #define VK_LCONTROL       0xA2
+    #define VK_RCONTROL       0xA3
+    #define VK_LMENU          0xA4
+    #define VK_RMENU          0xA5
+    #endif
+
+    // DirectInput Keyboard Scan Codes
+    #ifndef DIK_ESCAPE
+    #define DIK_ESCAPE          0x01
+    #define DIK_1               0x02
+    #define DIK_2               0x03
+    #define DIK_3               0x04
+    #define DIK_4               0x05
+    #define DIK_5               0x06
+    #define DIK_6               0x07
+    #define DIK_7               0x08
+    #define DIK_8               0x09
+    #define DIK_9               0x0A
+    #define DIK_0               0x0B
+    #define DIK_MINUS           0x0C
+    #define DIK_EQUALS          0x0D
+    #define DIK_BACK            0x0E
+    #define DIK_TAB             0x0F
+    #define DIK_Q               0x10
+    #define DIK_W               0x11
+    #define DIK_E               0x12
+    #define DIK_R               0x13
+    #define DIK_T               0x14
+    #define DIK_Y               0x15
+    #define DIK_U               0x16
+    #define DIK_I               0x17
+    #define DIK_O               0x18
+    #define DIK_P               0x19
+    #define DIK_LBRACKET        0x1A
+    #define DIK_RBRACKET        0x1B
+    #define DIK_RETURN          0x1C
+    #define DIK_LCONTROL        0x1D
+    #define DIK_A               0x1E
+    #define DIK_S               0x1F
+    #define DIK_D               0x20
+    #define DIK_F               0x21
+    #define DIK_G               0x22
+    #define DIK_H               0x23
+    #define DIK_J               0x24
+    #define DIK_K               0x25
+    #define DIK_L               0x26
+    #define DIK_SEMICOLON       0x27
+    #define DIK_APOSTROPHE      0x28
+    #define DIK_GRAVE           0x29
+    #define DIK_LSHIFT          0x2A
+    #define DIK_BACKSLASH       0x2B
+    #define DIK_Z               0x2C
+    #define DIK_X               0x2D
+    #define DIK_C               0x2E
+    #define DIK_V               0x2F
+    #define DIK_B               0x30
+    #define DIK_N               0x31
+    #define DIK_M               0x32
+    #define DIK_COMMA           0x33
+    #define DIK_PERIOD          0x34
+    #define DIK_SLASH           0x35
+    #define DIK_RSHIFT          0x36
+    #define DIK_MULTIPLY        0x37
+    #define DIK_LMENU           0x38
+    #define DIK_SPACE           0x39
+    #define DIK_CAPITAL         0x3A
+    #define DIK_F1              0x3B
+    #define DIK_F2              0x3C
+    #define DIK_F3              0x3D
+    #define DIK_F4              0x3E
+    #define DIK_F5              0x3F
+    #define DIK_F6              0x40
+    #define DIK_F7              0x41
+    #define DIK_F8              0x42
+    #define DIK_F9              0x43
+    #define DIK_F10             0x44
+    #define DIK_NUMLOCK         0x45
+    #define DIK_SCROLL          0x46
+    #define DIK_NUMPAD7         0x47
+    #define DIK_NUMPAD8         0x48
+    #define DIK_NUMPAD9         0x49
+    #define DIK_SUBTRACT        0x4A
+    #define DIK_NUMPAD4         0x4B
+    #define DIK_NUMPAD5         0x4C
+    #define DIK_NUMPAD6         0x4D
+    #define DIK_ADD             0x4E
+    #define DIK_NUMPAD1         0x4F
+    #define DIK_NUMPAD2         0x50
+    #define DIK_NUMPAD3         0x51
+    #define DIK_NUMPAD0         0x52
+    #define DIK_DECIMAL         0x53
+    #define DIK_OEM_102         0x56
+    #define DIK_F11             0x57
+    #define DIK_F12             0x58
+    #define DIK_F13             0x64
+    #define DIK_F14             0x65
+    #define DIK_F15             0x66
+    #define DIK_KANA            0x70
+    #define DIK_ABNT_C1         0x73
+    #define DIK_CONVERT         0x79
+    #define DIK_NOCONVERT       0x7B
+    #define DIK_YEN             0x7D
+    #define DIK_ABNT_C2         0x7E
+    #define DIK_NUMPADEQUALS    0x8D
+    #define DIK_PREVTRACK       0x90
+    #define DIK_AT              0x91
+    #define DIK_COLON           0x92
+    #define DIK_UNDERLINE       0x93
+    #define DIK_KANJI           0x94
+    #define DIK_STOP            0x95
+    #define DIK_AX              0x96
+    #define DIK_UNLABELED       0x97
+    #define DIK_NEXTTRACK       0x99
+    #define DIK_NUMPADENTER     0x9C
+    #define DIK_RCONTROL        0x9D
+    #define DIK_MUTE            0xA0
+    #define DIK_CALCULATOR      0xA1
+    #define DIK_PLAYPAUSE       0xA2
+    #define DIK_MEDIASTOP       0xA4
+    #define DIK_VOLUMEDOWN      0xAE
+    #define DIK_VOLUMEUP        0xB0
+    #define DIK_WEBHOME         0xB2
+    #define DIK_NUMPADCOMMA     0xB3
+    #define DIK_DIVIDE          0xB5
+    #define DIK_SYSRQ           0xB7
+    #define DIK_RMENU           0xB8
+    #define DIK_PAUSE           0xC5
+    #define DIK_HOME            0xC7
+    #define DIK_UP              0xC8
+    #define DIK_PRIOR           0xC9
+    #define DIK_LEFT            0xCB
+    #define DIK_RIGHT           0xCD
+    #define DIK_END             0xCF
+    #define DIK_DOWN            0xD0
+    #define DIK_NEXT            0xD1
+    #define DIK_INSERT          0xD2
+    #define DIK_DELETE          0xD3
+    #define DIK_LWIN            0xDB
+    #define DIK_RWIN            0xDC
+    #define DIK_APPS            0xDD
+    #define DIK_POWER           0xDE
+    #define DIK_SLEEP           0xDF
+    #define DIK_WAKE            0xE3
+    #define DIK_WEBSEARCH       0xE5
+    #define DIK_WEBFAVORITES    0xE6
+    #define DIK_WEBREFRESH      0xE7
+    #define DIK_WEBSTOP         0xE8
+    #define DIK_WEBFORWARD      0xE9
+    #define DIK_WEBBACK         0xEA
+    #define DIK_MYCOMPUTER      0xEB
+    #define DIK_MAIL            0xEC
+    #define DIK_MEDIASELECT     0xED
     #endif
 
 #endif
