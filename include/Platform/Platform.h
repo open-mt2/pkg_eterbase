@@ -878,9 +878,48 @@
     inline BOOL ShowWindow(HWND, int) { return TRUE; }
     inline BOOL InvalidateRect(HWND, const RECT*, BOOL) { return TRUE; }
     inline int  GetSystemMetrics(int nIndex) { return (nIndex == SM_CXSCREEN) ? 1920 : 1080; }
-    inline BOOL GetWindowRect(HWND, LPRECT prc) { if (prc) { prc->left = 0; prc->top = 0; prc->right = 800; prc->bottom = 600; } return TRUE; }
-    inline BOOL GetClientRect(HWND, LPRECT prc) { if (prc) { prc->left = 0; prc->top = 0; prc->right = 800; prc->bottom = 600; } return TRUE; }
-    inline BOOL GetCursorPos(LPPOINT ppt) { if (ppt) { ppt->x = 0; ppt->y = 0; } return TRUE; }
+    struct PlatformWindowState {
+        int mouseX;
+        int mouseY;
+        int windowWidth;
+        int windowHeight;
+        HWND capturedWnd;
+    };
+    inline PlatformWindowState& GetPlatformWindowState() {
+        static PlatformWindowState s_ws = { 0, 0, 1024, 768, (HWND)0 };
+        return s_ws;
+    }
+    inline void Platform_SetCursorPos(int x, int y) {
+        GetPlatformWindowState().mouseX = x;
+        GetPlatformWindowState().mouseY = y;
+    }
+    inline void Platform_SetWindowResolution(int w, int h) {
+        GetPlatformWindowState().windowWidth = w;
+        GetPlatformWindowState().windowHeight = h;
+    }
+    inline BOOL GetWindowRect(HWND, LPRECT prc) {
+        if (prc) {
+            prc->left = 0; prc->top = 0;
+            prc->right = GetPlatformWindowState().windowWidth;
+            prc->bottom = GetPlatformWindowState().windowHeight;
+        }
+        return TRUE;
+    }
+    inline BOOL GetClientRect(HWND, LPRECT prc) {
+        if (prc) {
+            prc->left = 0; prc->top = 0;
+            prc->right = GetPlatformWindowState().windowWidth;
+            prc->bottom = GetPlatformWindowState().windowHeight;
+        }
+        return TRUE;
+    }
+    inline BOOL GetCursorPos(LPPOINT ppt) {
+        if (ppt) {
+            ppt->x = GetPlatformWindowState().mouseX;
+            ppt->y = GetPlatformWindowState().mouseY;
+        }
+        return TRUE;
+    }
     inline BOOL ScreenToClient(HWND, LPPOINT) { return TRUE; }
     inline BOOL SetWindowPos(HWND, HWND, int, int, int, int, UINT) { return TRUE; }
     inline BOOL SetRect(LPRECT lprc, int xLeft, int yTop, int xRight, int yBottom) {
@@ -936,9 +975,18 @@
         #define SystemParametersInfo SystemParametersInfoA
     #endif
 
-    inline HWND SetCapture(HWND) { return (HWND)0; }
-    inline BOOL ReleaseCapture() { return TRUE; }
-    inline HWND GetCapture() { return (HWND)0; }
+    inline HWND SetCapture(HWND hWnd) {
+        HWND prev = GetPlatformWindowState().capturedWnd;
+        GetPlatformWindowState().capturedWnd = hWnd;
+        return prev;
+    }
+    inline BOOL ReleaseCapture() {
+        GetPlatformWindowState().capturedWnd = (HWND)0;
+        return TRUE;
+    }
+    inline HWND GetCapture() {
+        return GetPlatformWindowState().capturedWnd;
+    }
 
     typedef struct _devicemodeA {
         BYTE  dmDeviceName[32];
