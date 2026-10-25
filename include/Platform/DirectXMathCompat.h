@@ -4,6 +4,19 @@
 #include <cmath>
 #include <vector>
 #include <cstring>
+#include <algorithm>
+
+#if defined(__LINUX__)
+typedef unsigned int GLuint;
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((weak)) bool Platform_GetImageInfo(const void* data, size_t size, uint32_t* outW, uint32_t* outH, uint32_t* outFormat);
+__attribute__((weak)) bool Platform_DecodeImage(const void* data, size_t size, uint32_t* outW, uint32_t* outH, std::vector<uint8_t>& outPixels);
+#else
+bool Platform_GetImageInfo(const void* data, size_t size, uint32_t* outW, uint32_t* outH, uint32_t* outFormat);
+bool Platform_DecodeImage(const void* data, size_t size, uint32_t* outW, uint32_t* outH, std::vector<uint8_t>& outPixels);
+#endif
+#endif
 
 #if defined(_WIN32) && !defined(USE_PLATFORM_D3D_COMPAT)
     #include <d3d9.h>
@@ -1625,22 +1638,30 @@ typedef IDirect3DBaseTexture9* LPDIRECT3DBASETEXTURE9;
 
 class IDirect3DTexture9 : public IDirect3DBaseTexture9 {
 public:
-    IDirect3DTexture9(UINT w = 1, UINT h = 1) : m_width(w ? w : 1), m_height(h ? h : 1), m_data(m_width * m_height * 4, 0) {}
-    HRESULT LockRect(UINT /*Level*/, D3DLOCKED_RECT* pLockedRect, const RECT* /*pRect*/, DWORD /*Flags*/) {
-        if (!pLockedRect) return E_INVALIDARG;
-        pLockedRect->Pitch = (INT)(m_width * 4);
-        pLockedRect->pBits = m_data.data();
-        return S_OK;
-    }
-    HRESULT UnlockRect(UINT /*Level*/) { return S_OK; }
-    HRESULT GetSurfaceLevel(UINT /*Level*/, IDirect3DSurface9** ppSurfaceLevel) {
-        if (!ppSurfaceLevel) return E_INVALIDARG;
-        *ppSurfaceLevel = new IDirect3DSurface9(m_width, m_height);
-        return S_OK;
-    }
+    IDirect3DTexture9(UINT w = 1, UINT h = 1, D3DFORMAT fmt = D3DFMT_A8R8G8B8);
+    ~IDirect3DTexture9() override;
+
+    UINT GetWidth() const { return m_width; }
+    UINT GetHeight() const { return m_height; }
+    D3DFORMAT GetFormat() const { return m_format; }
+    void* GetData() { return m_data.data(); }
+    const void* GetData() const { return m_data.data(); }
+    size_t GetDataSize() const { return m_data.size(); }
+
+    GLuint GetGLTexture();
+    HRESULT LockRect(UINT Level, D3DLOCKED_RECT* pLockedRect, const RECT* pRect, DWORD Flags);
+    HRESULT UnlockRect(UINT Level);
+    void UploadToGL();
+    INT GetPitch() const;
+    static size_t GetFormatBytesPerPixel(D3DFORMAT fmt);
+    HRESULT GetSurfaceLevel(UINT Level, IDirect3DSurface9** ppSurfaceLevel);
+
 private:
     UINT m_width;
     UINT m_height;
+    D3DFORMAT m_format;
+    GLuint m_glTextureId;
+    bool m_dirty;
     std::vector<BYTE> m_data;
 };
 typedef IDirect3DTexture9* LPDIRECT3DTEXTURE9;
@@ -1657,6 +1678,9 @@ public:
         return S_OK;
     }
     HRESULT Unlock() { return S_OK; }
+    const void* GetData() const { return m_data.data(); }
+    void* GetData() { return m_data.data(); }
+    size_t GetSize() const { return m_data.size(); }
 private:
     std::vector<BYTE> m_data;
 };
@@ -1674,6 +1698,9 @@ public:
         return S_OK;
     }
     HRESULT Unlock() { return S_OK; }
+    const void* GetData() const { return m_data.data(); }
+    void* GetData() { return m_data.data(); }
+    size_t GetSize() const { return m_data.size(); }
 private:
     std::vector<BYTE> m_data;
 };
@@ -1732,15 +1759,17 @@ typedef ID3DXMesh* LPD3DXMESH;
 
 class IDirect3DDevice9 : public IDirect3DResource9 {
 public:
-    IDirect3DDevice9() : m_fvf(D3DFVF_XYZ) {
-        std::memset(&m_viewport, 0, sizeof(m_viewport));
-        m_viewport.Width = 800;
-        m_viewport.Height = 600;
-        m_viewport.MaxZ = 1.0f;
-    }
+    struct StreamSource {
+        IDirect3DVertexBuffer9* vb;
+        UINT offset;
+        UINT stride;
+        StreamSource() : vb(nullptr), offset(0), stride(0) {}
+    };
+
+    IDirect3DDevice9();
 
     HRESULT TestCooperativeLevel() { return S_OK; }
-    UINT    GetAvailableTextureMem() { return 256 * 1024 * 1024; }
+    UINT    GetAvailableTextureMem() { return 512 * 1024 * 1024; }
     HRESULT Reset(D3DPRESENT_PARAMETERS*) { return S_OK; }
     HRESULT Present(const RECT*, const RECT*, HWND, const void*) { return S_OK; }
     HRESULT GetDeviceCaps(D3DCAPS9* pCaps) {
@@ -1786,10 +1815,7 @@ public:
         if (pMatrix && (unsigned)State < 512) *pMatrix = m_transforms[State];
         return S_OK;
     }
-    HRESULT SetViewport(const D3DVIEWPORT9* pViewport) {
-        if (pViewport) m_viewport = *pViewport;
-        return S_OK;
-    }
+    HRESULT SetViewport(const D3DVIEWPORT9* pViewport);
     HRESULT GetViewport(D3DVIEWPORT9* pViewport) {
         if (pViewport) *pViewport = m_viewport;
         return S_OK;
@@ -1799,10 +1825,10 @@ public:
     HRESULT SetLight(DWORD, const D3DLIGHT9*) { return S_OK; }
     HRESULT GetLight(DWORD, D3DLIGHT9*) { return S_OK; }
     HRESULT LightEnable(DWORD, BOOL) { return S_OK; }
-    HRESULT SetRenderState(D3DRENDERSTATETYPE, DWORD) { return S_OK; }
+    HRESULT SetRenderState(D3DRENDERSTATETYPE State, DWORD Value);
     HRESULT GetRenderState(D3DRENDERSTATETYPE, DWORD*) { return S_OK; }
-    HRESULT SetTexture(DWORD, IDirect3DBaseTexture9*) { return S_OK; }
-    HRESULT GetTexture(DWORD, IDirect3DBaseTexture9**) { return S_OK; }
+    HRESULT SetTexture(DWORD Stage, IDirect3DBaseTexture9* pTexture);
+    HRESULT GetTexture(DWORD Stage, IDirect3DBaseTexture9** ppTexture);
     HRESULT SetTextureStageState(DWORD, D3DTEXTURESTAGESTATETYPE, DWORD) { return S_OK; }
     HRESULT GetTextureStageState(DWORD, D3DTEXTURESTAGESTATETYPE, DWORD*) { return S_OK; }
     HRESULT SetSamplerState(DWORD, D3DSAMPLERSTATETYPE, DWORD) { return S_OK; }
@@ -1828,9 +1854,9 @@ public:
     HRESULT SetPixelShader(IDirect3DPixelShader9*) { return S_OK; }
     HRESULT GetPixelShader(IDirect3DPixelShader9**) { return S_OK; }
     HRESULT SetPixelShaderConstantF(UINT, const float*, UINT) { return S_OK; }
-    HRESULT CreateTexture(UINT Width, UINT Height, UINT /*Levels*/, DWORD /*Usage*/, D3DFORMAT /*Format*/, D3DPOOL /*Pool*/, IDirect3DTexture9** ppTexture, HANDLE* /*pSharedHandle*/) {
+    HRESULT CreateTexture(UINT Width, UINT Height, UINT /*Levels*/, DWORD /*Usage*/, D3DFORMAT Format, D3DPOOL /*Pool*/, IDirect3DTexture9** ppTexture, HANDLE* /*pSharedHandle*/) {
         if (!ppTexture) return E_INVALIDARG;
-        *ppTexture = new IDirect3DTexture9(Width, Height);
+        *ppTexture = new IDirect3DTexture9(Width, Height, Format);
         return S_OK;
     }
     HRESULT CreateVertexBuffer(UINT Length, DWORD /*Usage*/, DWORD /*FVF*/, D3DPOOL /*Pool*/, IDirect3DVertexBuffer9** ppVertexBuffer, HANDLE* /*pSharedHandle*/) {
@@ -1848,17 +1874,30 @@ public:
         *ppSurface = new IDirect3DSurface9(Width, Height);
         return S_OK;
     }
-    HRESULT SetStreamSource(UINT, IDirect3DVertexBuffer9*, UINT, UINT) { return S_OK; }
-    HRESULT SetIndices(IDirect3DIndexBuffer9*) { return S_OK; }
-    HRESULT DrawPrimitive(D3DPRIMITIVETYPE, UINT, UINT) { return S_OK; }
-    HRESULT DrawIndexedPrimitive(D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT) { return S_OK; }
-    HRESULT DrawPrimitiveUP(D3DPRIMITIVETYPE, UINT, const void*, UINT) { return S_OK; }
-    HRESULT DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE, UINT, UINT, UINT, const void*, D3DFORMAT, const void*, UINT) { return S_OK; }
+    HRESULT SetStreamSource(UINT StreamNumber, IDirect3DVertexBuffer9* pStreamData, UINT OffsetInBytes, UINT Stride) {
+        if (StreamNumber < 16) {
+            m_streams[StreamNumber].vb = pStreamData;
+            m_streams[StreamNumber].offset = OffsetInBytes;
+            m_streams[StreamNumber].stride = Stride;
+        }
+        return S_OK;
+    }
+    HRESULT SetIndices(IDirect3DIndexBuffer9* pIndexData) {
+        m_pIndexBuffer = pIndexData;
+        return S_OK;
+    }
+    HRESULT DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount);
+    HRESULT DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount);
+    HRESULT DrawPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, const void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
+    HRESULT DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertexIndices, UINT PrimitiveCount, const void* pIndexData, D3DFORMAT IndexDataFormat, const void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
 
 private:
-    DWORD        m_fvf;
-    D3DVIEWPORT9 m_viewport;
-    D3DXMATRIX   m_transforms[512];
+    StreamSource           m_streams[16];
+    IDirect3DIndexBuffer9* m_pIndexBuffer;
+    IDirect3DTexture9*     m_boundTextures[8];
+    DWORD                  m_fvf;
+    D3DVIEWPORT9           m_viewport;
+    D3DXMATRIX             m_transforms[512];
 };
 typedef IDirect3DDevice9* LPDIRECT3DDEVICE9;
 
@@ -1921,9 +1960,9 @@ inline HRESULT D3DXCreateCylinder(LPDIRECT3DDEVICE9, float, float, float, UINT, 
     return S_OK;
 }
 
-inline HRESULT D3DXCreateTexture(LPDIRECT3DDEVICE9, UINT Width, UINT Height, UINT /*MipLevels*/, DWORD /*Usage*/, D3DFORMAT /*Format*/, D3DPOOL /*Pool*/, LPDIRECT3DTEXTURE9* ppTexture) {
+inline HRESULT D3DXCreateTexture(LPDIRECT3DDEVICE9, UINT Width, UINT Height, UINT /*MipLevels*/, DWORD /*Usage*/, D3DFORMAT Format, D3DPOOL /*Pool*/, LPDIRECT3DTEXTURE9* ppTexture) {
     if (!ppTexture) return E_INVALIDARG;
-    *ppTexture = new IDirect3DTexture9(Width, Height);
+    *ppTexture = new IDirect3DTexture9(Width, Height, Format);
     return S_OK;
 }
 
@@ -1936,18 +1975,49 @@ inline HRESULT D3DXGetImageInfoFromFileInMemory(LPCVOID pSrcData, UINT SrcDataSi
     pSrcInfo->MipLevels = 1;
     pSrcInfo->Format = D3DFMT_A8R8G8B8;
     pSrcInfo->ResourceType = D3DRTYPE_TEXTURE;
+
+#if defined(__LINUX__)
+    if (Platform_GetImageInfo) {
+        uint32_t w = 0, h = 0, fmt = 21;
+        if (Platform_GetImageInfo(pSrcData, SrcDataSize, &w, &h, &fmt)) {
+            pSrcInfo->Width = w;
+            pSrcInfo->Height = h;
+            pSrcInfo->Format = (D3DFORMAT)fmt;
+        }
+    }
+#endif
     return S_OK;
 }
 
 inline HRESULT D3DXCreateTextureFromFileInMemoryEx(
     LPDIRECT3DDEVICE9, LPCVOID pSrcData, UINT SrcDataSize,
     UINT Width, UINT Height, UINT /*MipLevels*/, DWORD /*Usage*/,
-    D3DFORMAT /*Format*/, D3DPOOL /*Pool*/, DWORD /*Filter*/, DWORD /*MipFilter*/,
+    D3DFORMAT Format, D3DPOOL /*Pool*/, DWORD /*Filter*/, DWORD /*MipFilter*/,
     D3DCOLOR /*ColorKey*/, D3DXIMAGE_INFO* /*pSrcInfo*/, void* /*pPalette*/,
     LPDIRECT3DTEXTURE9* ppTexture)
 {
     if (!pSrcData || SrcDataSize == 0 || !ppTexture) return E_FAIL;
-    *ppTexture = new IDirect3DTexture9(Width == D3DX_DEFAULT ? 64 : Width, Height == D3DX_DEFAULT ? 64 : Height);
+
+#if defined(__LINUX__)
+    if (Platform_DecodeImage) {
+        uint32_t w = 0, h = 0;
+        std::vector<uint8_t> pixels;
+        if (Platform_DecodeImage(pSrcData, SrcDataSize, &w, &h, pixels)) {
+            IDirect3DTexture9* pTex = new IDirect3DTexture9(w, h, D3DFMT_A8R8G8B8);
+            D3DLOCKED_RECT lr;
+            if (SUCCEEDED(pTex->LockRect(0, &lr, nullptr, 0))) {
+                if (lr.pBits && !pixels.empty()) {
+                    std::memcpy(lr.pBits, pixels.data(), std::min(pixels.size(), (size_t)(w * h * 4)));
+                }
+                pTex->UnlockRect(0);
+            }
+            *ppTexture = pTex;
+            return S_OK;
+        }
+    }
+#endif
+
+    *ppTexture = new IDirect3DTexture9(Width == D3DX_DEFAULT ? 64 : Width, Height == D3DX_DEFAULT ? 64 : Height, Format);
     return S_OK;
 }
 

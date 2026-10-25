@@ -32,16 +32,19 @@ endif()
 # Dependencies
 find_package(PkgConfig QUIET)
 find_library(LZO_LIBRARY NAMES lzo2 lzo REQUIRED)
+find_package(OpenGL REQUIRED)
 
 # Source files
 set(ETERBASE_SOURCES
     src/CPostIt.cpp
     src/CRC32.cpp
     src/Debug.cpp
+    src/Direct3DDevice9Compat.cpp
     src/error.cpp
     src/FileBase.cpp
     src/FileDir.cpp
     src/FileLoader.cpp
+    src/ImageLoaderCompat.cpp
     src/lzo.cpp
     src/MappedFile.cpp
     src/Random.cpp
@@ -66,6 +69,7 @@ set(ETERBASE_HEADERS
     include/EterBase/FileDir.h
     include/EterBase/FileLoader.h
     include/EterBase/Filename.h
+    include/EterBase/ImageLoaderCompat.h
     include/EterBase/lzo.h
     include/EterBase/MappedFile.h
     include/EterBase/Random.h
@@ -105,6 +109,7 @@ target_include_directories(EterBase
 target_link_libraries(EterBase
     PUBLIC
         ${LZO_LIBRARY}
+        OpenGL::GL
 )
 
 # Unit Tests
