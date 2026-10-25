@@ -140,7 +140,9 @@ HRESULT IDirect3DTexture9::GetSurfaceLevel(UINT, IDirect3DSurface9** ppSurfaceLe
 // IDirect3DDevice9 Implementation
 // =============================================================
 
-IDirect3DDevice9::IDirect3DDevice9() : m_pIndexBuffer(nullptr), m_fvf(D3DFVF_XYZ)
+IDirect3DDevice9::IDirect3DDevice9()
+    : m_pIndexBuffer(nullptr), m_fvf(D3DFVF_XYZ),
+      m_srcBlend(D3DBLEND_SRCALPHA), m_destBlend(D3DBLEND_INVSRCALPHA)
 {
     std::memset(&m_viewport, 0, sizeof(m_viewport));
     m_viewport.Width = 1024;
@@ -172,6 +174,10 @@ HRESULT IDirect3DDevice9::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value)
             glEnable(GL_CULL_FACE);
             glCullFace((Value == D3DCULL_CW) ? GL_BACK : GL_FRONT);
         }
+    } else if (State == D3DRS_SRCBLEND) {
+        m_srcBlend = Value;
+    } else if (State == D3DRS_DESTBLEND) {
+        m_destBlend = Value;
     }
     return S_OK;
 }
@@ -198,7 +204,24 @@ HRESULT IDirect3DDevice9::GetTexture(DWORD Stage, IDirect3DBaseTexture9** ppText
     return S_OK;
 }
 
-static inline void SetupGL2DState(const D3DVIEWPORT9& vp, IDirect3DTexture9* boundTex)
+static inline GLenum ToGLBlend(DWORD d3dBlend)
+{
+    switch (d3dBlend) {
+        case D3DBLEND_ZERO: return GL_ZERO;
+        case D3DBLEND_ONE: return GL_ONE;
+        case D3DBLEND_SRCCOLOR: return GL_SRC_COLOR;
+        case D3DBLEND_INVSRCCOLOR: return GL_ONE_MINUS_SRC_COLOR;
+        case D3DBLEND_SRCALPHA: return GL_SRC_ALPHA;
+        case D3DBLEND_INVSRCALPHA: return GL_ONE_MINUS_SRC_ALPHA;
+        case D3DBLEND_DESTALPHA: return GL_DST_ALPHA;
+        case D3DBLEND_INVDESTALPHA: return GL_ONE_MINUS_DST_ALPHA;
+        case D3DBLEND_DESTCOLOR: return GL_DST_COLOR;
+        case D3DBLEND_INVDESTCOLOR: return GL_ONE_MINUS_DST_COLOR;
+        default: return GL_ONE;
+    }
+}
+
+static inline void SetupGL2DState(const D3DVIEWPORT9& vp, IDirect3DTexture9* boundTex, DWORD srcBlend, DWORD destBlend)
 {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -207,7 +230,7 @@ static inline void SetupGL2DState(const D3DVIEWPORT9& vp, IDirect3DTexture9* bou
     glLoadIdentity();
 
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFunc(ToGLBlend(srcBlend), ToGLBlend(destBlend));
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
 
@@ -230,7 +253,7 @@ HRESULT IDirect3DDevice9::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType, UINT Sta
     const BYTE* vbData = (const BYTE*)m_streams[0].vb->GetData() + m_streams[0].offset;
     UINT stride = m_streams[0].stride ? m_streams[0].stride : 24;
 
-    SetupGL2DState(m_viewport, m_boundTextures[0]);
+    SetupGL2DState(m_viewport, m_boundTextures[0], m_srcBlend, m_destBlend);
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glVertexPointer(3, GL_FLOAT, stride, vbData);
@@ -240,7 +263,7 @@ HRESULT IDirect3DDevice9::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType, UINT Sta
 
     if (hasDiffuse) {
         glEnableClientState(GL_COLOR_ARRAY);
-        glColorPointer(4, GL_UNSIGNED_BYTE, stride, vbData + 12);
+        glColorPointer(GL_BGRA, GL_UNSIGNED_BYTE, stride, vbData + 12);
     } else {
         glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     }
@@ -274,7 +297,7 @@ HRESULT IDirect3DDevice9::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveType, I
     UINT stride = m_streams[0].stride ? m_streams[0].stride : 24;
     const WORD* ibData = (const WORD*)m_pIndexBuffer->GetData() + StartIndex;
 
-    SetupGL2DState(m_viewport, m_boundTextures[0]);
+    SetupGL2DState(m_viewport, m_boundTextures[0], m_srcBlend, m_destBlend);
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glVertexPointer(3, GL_FLOAT, stride, vbData);
@@ -284,7 +307,7 @@ HRESULT IDirect3DDevice9::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveType, I
 
     if (hasDiffuse) {
         glEnableClientState(GL_COLOR_ARRAY);
-        glColorPointer(4, GL_UNSIGNED_BYTE, stride, vbData + 12);
+        glColorPointer(GL_BGRA, GL_UNSIGNED_BYTE, stride, vbData + 12);
     } else {
         glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     }
@@ -317,7 +340,7 @@ HRESULT IDirect3DDevice9::DrawPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType, UINT P
     const BYTE* vbData = (const BYTE*)pVertexStreamZeroData;
     UINT stride = VertexStreamZeroStride ? VertexStreamZeroStride : 24;
 
-    SetupGL2DState(m_viewport, m_boundTextures[0]);
+    SetupGL2DState(m_viewport, m_boundTextures[0], m_srcBlend, m_destBlend);
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glVertexPointer(3, GL_FLOAT, stride, vbData);
@@ -327,7 +350,7 @@ HRESULT IDirect3DDevice9::DrawPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType, UINT P
 
     if (hasDiffuse) {
         glEnableClientState(GL_COLOR_ARRAY);
-        glColorPointer(4, GL_UNSIGNED_BYTE, stride, vbData + 12);
+        glColorPointer(GL_BGRA, GL_UNSIGNED_BYTE, stride, vbData + 12);
     } else {
         glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     }
@@ -360,7 +383,7 @@ HRESULT IDirect3DDevice9::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType,
     const BYTE* vbData = (const BYTE*)pVertexStreamZeroData;
     UINT stride = VertexStreamZeroStride ? VertexStreamZeroStride : 24;
 
-    SetupGL2DState(m_viewport, m_boundTextures[0]);
+    SetupGL2DState(m_viewport, m_boundTextures[0], m_srcBlend, m_destBlend);
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glVertexPointer(3, GL_FLOAT, stride, vbData);
@@ -370,7 +393,7 @@ HRESULT IDirect3DDevice9::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType,
 
     if (hasDiffuse) {
         glEnableClientState(GL_COLOR_ARRAY);
-        glColorPointer(4, GL_UNSIGNED_BYTE, stride, vbData + 12);
+        glColorPointer(GL_BGRA, GL_UNSIGNED_BYTE, stride, vbData + 12);
     } else {
         glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     }

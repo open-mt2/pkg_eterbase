@@ -1891,12 +1891,17 @@ public:
     HRESULT DrawPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, const void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
     HRESULT DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertexIndices, UINT PrimitiveCount, const void* pIndexData, D3DFORMAT IndexDataFormat, const void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
 
+    DWORD GetSrcBlend() const { return m_srcBlend; }
+    DWORD GetDestBlend() const { return m_destBlend; }
+
 private:
     StreamSource           m_streams[16];
     IDirect3DIndexBuffer9* m_pIndexBuffer;
     IDirect3DTexture9*     m_boundTextures[8];
     DWORD                  m_fvf;
     D3DVIEWPORT9           m_viewport;
+    DWORD                  m_srcBlend;
+    DWORD                  m_destBlend;
     D3DXMATRIX             m_transforms[512];
 };
 typedef IDirect3DDevice9* LPDIRECT3DDEVICE9;
