@@ -33,6 +33,7 @@
     #include <time.h>
     #include <string>
     #include <glob.h>
+    #include <atomic>
 
     // Basic Win32 Scalar Types
     typedef uint32_t      DWORD;
@@ -950,7 +951,28 @@
     inline BOOL TranslateMessage(const MSG*) { return TRUE; }
     inline LRESULT DispatchMessageA(const MSG*) { return 0; }
     #define DispatchMessage DispatchMessageA
-    inline void PostQuitMessage(int) {}
+    typedef void (*Platform_QuitCallback)(int);
+    inline Platform_QuitCallback& Platform_GetQuitCallback() {
+        static Platform_QuitCallback s_cb = nullptr;
+        return s_cb;
+    }
+    inline void Platform_SetQuitCallback(Platform_QuitCallback cb) {
+        Platform_GetQuitCallback() = cb;
+    }
+    inline std::atomic<bool>& Platform_GetQuitRequested() {
+        static std::atomic<bool> s_quitRequested(false);
+        return s_quitRequested;
+    }
+    inline bool Platform_IsQuitRequested() {
+        return Platform_GetQuitRequested().load();
+    }
+    inline void PostQuitMessage(int exitCode) {
+        Platform_GetQuitRequested().store(true);
+        Platform_QuitCallback cb = Platform_GetQuitCallback();
+        if (cb) {
+            cb(exitCode);
+        }
+    }
     inline SHORT GetKeyState(int /*nVirtKey*/) { return 0; }
     inline SHORT GetAsyncKeyState(int /*vKey*/) { return 0; }
     inline BOOL ClientToScreen(HWND /*hWnd*/, LPPOINT /*lpPoint*/) { return TRUE; }
