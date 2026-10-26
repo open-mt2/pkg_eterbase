@@ -151,13 +151,44 @@ HRESULT IDirect3DTexture9::GetSurfaceLevel(UINT, IDirect3DSurface9** ppSurfaceLe
 
 IDirect3DDevice9::IDirect3DDevice9()
     : m_pIndexBuffer(nullptr), m_fvf(D3DFVF_XYZ),
-      m_srcBlend(D3DBLEND_SRCALPHA), m_destBlend(D3DBLEND_INVSRCALPHA)
+      m_srcBlend(D3DBLEND_SRCALPHA), m_destBlend(D3DBLEND_INVSRCALPHA),
+      m_zEnable(false), m_zWriteEnable(true), m_zFunc(D3DCMP_LESSEQUAL),
+      m_alphaBlendEnable(false), m_alphaTestEnable(false),
+      m_alphaRef(0), m_alphaFunc(D3DCMP_ALWAYS),
+      m_cullMode(D3DCULL_CCW), m_fillMode(D3DFILL_SOLID)
 {
     std::memset(&m_viewport, 0, sizeof(m_viewport));
     m_viewport.Width = 1024;
     m_viewport.Height = 768;
     m_viewport.MaxZ = 1.0f;
     for (int i = 0; i < 8; ++i) m_boundTextures[i] = nullptr;
+    for (int i = 0; i < 512; ++i) D3DXMatrixIdentity(&m_transforms[i]);
+}
+
+HRESULT IDirect3DDevice9::Clear(DWORD /*Count*/, const RECT* /*pRects*/, DWORD Flags, D3DCOLOR Color, float Z, DWORD Stencil)
+{
+    GLbitfield mask = 0;
+    if (Flags & D3DCLEAR_TARGET) {
+        float a = ((Color >> 24) & 0xFF) / 255.0f;
+        float r = ((Color >> 16) & 0xFF) / 255.0f;
+        float g = ((Color >> 8) & 0xFF) / 255.0f;
+        float b = (Color & 0xFF) / 255.0f;
+        glClearColor(r, g, b, a);
+        mask |= GL_COLOR_BUFFER_BIT;
+    }
+    if (Flags & D3DCLEAR_ZBUFFER) {
+        glDepthMask(GL_TRUE);
+        glClearDepth(Z);
+        mask |= GL_DEPTH_BUFFER_BIT;
+    }
+    if (Flags & D3DCLEAR_STENCIL) {
+        glClearStencil(Stencil);
+        mask |= GL_STENCIL_BUFFER_BIT;
+    }
+    if (mask) {
+        glClear(mask);
+    }
+    return S_OK;
 }
 
 HRESULT IDirect3DDevice9::SetViewport(const D3DVIEWPORT9* pViewport)
@@ -171,22 +202,82 @@ HRESULT IDirect3DDevice9::SetViewport(const D3DVIEWPORT9* pViewport)
 
 HRESULT IDirect3DDevice9::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value)
 {
-    if (State == D3DRS_ALPHABLENDENABLE) {
-        if (Value) glEnable(GL_BLEND);
-        else glDisable(GL_BLEND);
-    } else if (State == D3DRS_ZENABLE) {
-        if (Value) glEnable(GL_DEPTH_TEST);
-        else glDisable(GL_DEPTH_TEST);
-    } else if (State == D3DRS_CULLMODE) {
-        if (Value == D3DCULL_NONE) glDisable(GL_CULL_FACE);
-        else {
-            glEnable(GL_CULL_FACE);
-            glCullFace((Value == D3DCULL_CW) ? GL_BACK : GL_FRONT);
+    switch (State) {
+        case D3DRS_ALPHABLENDENABLE:
+            m_alphaBlendEnable = (Value != 0);
+            break;
+        case D3DRS_SRCBLEND:
+            m_srcBlend = Value;
+            break;
+        case D3DRS_DESTBLEND:
+            m_destBlend = Value;
+            break;
+        case D3DRS_ZENABLE:
+            m_zEnable = (Value != 0);
+            break;
+        case D3DRS_ZWRITEENABLE:
+            m_zWriteEnable = (Value != 0);
+            break;
+        case D3DRS_ZFUNC:
+            m_zFunc = Value;
+            break;
+        case D3DRS_ALPHATESTENABLE:
+            m_alphaTestEnable = (Value != 0);
+            break;
+        case D3DRS_ALPHAREF:
+            m_alphaRef = Value;
+            break;
+        case D3DRS_ALPHAFUNC:
+            m_alphaFunc = Value;
+            break;
+        case D3DRS_CULLMODE:
+            m_cullMode = Value;
+            break;
+        case D3DRS_FILLMODE:
+            m_fillMode = Value;
+            break;
+        default:
+            break;
+    }
+    return S_OK;
+}
+
+HRESULT IDirect3DDevice9::GetRenderState(D3DRENDERSTATETYPE State, DWORD* pValue)
+{
+    if (!pValue) return E_INVALIDARG;
+    switch (State) {
+        case D3DRS_ALPHABLENDENABLE: *pValue = m_alphaBlendEnable ? 1 : 0; break;
+        case D3DRS_SRCBLEND: *pValue = m_srcBlend; break;
+        case D3DRS_DESTBLEND: *pValue = m_destBlend; break;
+        case D3DRS_ZENABLE: *pValue = m_zEnable ? 1 : 0; break;
+        case D3DRS_ZWRITEENABLE: *pValue = m_zWriteEnable ? 1 : 0; break;
+        case D3DRS_ZFUNC: *pValue = m_zFunc; break;
+        case D3DRS_ALPHATESTENABLE: *pValue = m_alphaTestEnable ? 1 : 0; break;
+        case D3DRS_ALPHAREF: *pValue = m_alphaRef; break;
+        case D3DRS_ALPHAFUNC: *pValue = m_alphaFunc; break;
+        case D3DRS_CULLMODE: *pValue = m_cullMode; break;
+        case D3DRS_FILLMODE: *pValue = m_fillMode; break;
+        default: *pValue = 0; break;
+    }
+    return S_OK;
+}
+
+HRESULT IDirect3DDevice9::SetSamplerState(DWORD Stage, D3DSAMPLERSTATETYPE Type, DWORD Value)
+{
+    if (Stage < 8) {
+        glActiveTexture(GL_TEXTURE0 + Stage);
+        if (Type == D3DSAMP_ADDRESSU) {
+            GLint wrap = (Value == D3DTADDRESS_WRAP) ? GL_REPEAT : GL_CLAMP_TO_EDGE;
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap);
+        } else if (Type == D3DSAMP_ADDRESSV) {
+            GLint wrap = (Value == D3DTADDRESS_WRAP) ? GL_REPEAT : GL_CLAMP_TO_EDGE;
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap);
+        } else if (Type == D3DSAMP_MAGFILTER) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (Value == D3DTEXF_POINT) ? GL_NEAREST : GL_LINEAR);
+        } else if (Type == D3DSAMP_MINFILTER) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (Value == D3DTEXF_POINT) ? GL_NEAREST : GL_LINEAR);
         }
-    } else if (State == D3DRS_SRCBLEND) {
-        m_srcBlend = Value;
-    } else if (State == D3DRS_DESTBLEND) {
-        m_destBlend = Value;
+        glActiveTexture(GL_TEXTURE0);
     }
     return S_OK;
 }
@@ -230,116 +321,274 @@ static inline GLenum ToGLBlend(DWORD d3dBlend)
     }
 }
 
-static inline void SetupGL2DState(const D3DVIEWPORT9& vp, IDirect3DTexture9* boundTex, DWORD srcBlend, DWORD destBlend)
+static inline GLenum ToGLCmpFunc(DWORD d3dCmp)
 {
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    // Compensate for DX9 half-pixel offset (-0.5f in vertex coordinates)
-    glOrtho(-0.5, (double)vp.Width - 0.5, (double)vp.Height - 0.5, -0.5, -1000.0, 1000.0);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-
-    glEnable(GL_BLEND);
-    glBlendFunc(ToGLBlend(srcBlend), ToGLBlend(destBlend));
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
-
-    if (boundTex && boundTex->GetGLTexture()) {
-        glActiveTexture(GL_TEXTURE0);
-        glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, boundTex->GetGLTexture());
-        glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-    } else {
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glDisable(GL_TEXTURE_2D);
+    switch (d3dCmp) {
+        case D3DCMP_NEVER: return GL_NEVER;
+        case D3DCMP_LESS: return GL_LESS;
+        case D3DCMP_EQUAL: return GL_EQUAL;
+        case D3DCMP_LESSEQUAL: return GL_LEQUAL;
+        case D3DCMP_GREATER: return GL_GREATER;
+        case D3DCMP_NOTEQUAL: return GL_NOTEQUAL;
+        case D3DCMP_GREATEREQUAL: return GL_GEQUAL;
+        case D3DCMP_ALWAYS: return GL_ALWAYS;
+        default: return GL_LEQUAL;
     }
+}
+
+static inline GLenum ToGLPrimitive(D3DPRIMITIVETYPE pt)
+{
+    switch (pt) {
+        case D3DPT_POINTLIST: return GL_POINTS;
+        case D3DPT_LINELIST: return GL_LINES;
+        case D3DPT_LINESTRIP: return GL_LINE_STRIP;
+        case D3DPT_TRIANGLELIST: return GL_TRIANGLES;
+        case D3DPT_TRIANGLESTRIP: return GL_TRIANGLE_STRIP;
+        case D3DPT_TRIANGLEFAN: return GL_TRIANGLE_FAN;
+        default: return GL_TRIANGLES;
+    }
+}
+
+static inline UINT PrimitiveCountToVertexCount(D3DPRIMITIVETYPE pt, UINT count)
+{
+    switch (pt) {
+        case D3DPT_POINTLIST: return count;
+        case D3DPT_LINELIST: return count * 2;
+        case D3DPT_LINESTRIP: return count + 1;
+        case D3DPT_TRIANGLELIST: return count * 3;
+        case D3DPT_TRIANGLESTRIP: return count + 2;
+        case D3DPT_TRIANGLEFAN: return count + 2;
+        default: return count * 3;
+    }
+}
+
+void IDirect3DDevice9::SetupGLState()
+{
+    // 1. Matrix Setup
+    DWORD posType = m_fvf & D3DFVF_POSITION_MASK;
+    if (posType == D3DFVF_XYZRHW) {
+        // Pre-transformed 2D screen vertices
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        glOrtho(0.0, (double)m_viewport.Width, (double)m_viewport.Height, 0.0, -1000.0, 1000.0);
+        glMatrixMode(GL_MODELVIEW);
+        glLoadIdentity();
+    } else {
+        // Ortho 2D (Metin2 UI) vs 3D Perspective
+        bool isOrtho2D = (m_transforms[D3DTS_PROJECTION]._44 != 0.0f && m_transforms[D3DTS_PROJECTION]._22 < 0.0f);
+        if (isOrtho2D) {
+            glMatrixMode(GL_PROJECTION);
+            glLoadIdentity();
+            // Half-pixel offset compensation for D3D9 texels
+            glOrtho(-0.5, (double)m_viewport.Width - 0.5, (double)m_viewport.Height - 0.5, -0.5, -1000.0, 1000.0);
+            glMatrixMode(GL_MODELVIEW);
+            glLoadIdentity();
+        } else {
+            // 3D Perspective Pipeline
+            glMatrixMode(GL_PROJECTION);
+            glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_PROJECTION]);
+            glMatrixMode(GL_MODELVIEW);
+            glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_VIEW]);
+            glMultMatrixf((const GLfloat*)&m_transforms[D3DTS_WORLD]);
+        }
+    }
+
+    // 2. Depth Test & Write
+    if (m_zEnable) {
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(ToGLCmpFunc(m_zFunc));
+    } else {
+        glDisable(GL_DEPTH_TEST);
+    }
+    glDepthMask(m_zWriteEnable ? GL_TRUE : GL_FALSE);
+
+    // 3. Alpha Blending
+    if (m_alphaBlendEnable) {
+        glEnable(GL_BLEND);
+        glBlendFunc(ToGLBlend(m_srcBlend), ToGLBlend(m_destBlend));
+    } else {
+        glDisable(GL_BLEND);
+    }
+
+    // 4. Alpha Testing
+    if (m_alphaTestEnable) {
+        glEnable(GL_ALPHA_TEST);
+        glAlphaFunc(ToGLCmpFunc(m_alphaFunc), (GLclampf)(m_alphaRef / 255.0f));
+    } else {
+        glDisable(GL_ALPHA_TEST);
+    }
+
+    // 5. Culling
+    if (m_cullMode == D3DCULL_NONE) {
+        glDisable(GL_CULL_FACE);
+    } else {
+        glEnable(GL_CULL_FACE);
+        glFrontFace(GL_CW); // D3D standard front-face is clockwise
+        glCullFace((m_cullMode == D3DCULL_CW) ? GL_FRONT : GL_BACK);
+    }
+
+    // 6. Fill Mode
+    if (m_fillMode == D3DFILL_WIREFRAME) {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    } else if (m_fillMode == D3DFILL_POINT) {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_POINT);
+    } else {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    }
+
+    // 7. Textures & Transforms
+    UINT numTex = (m_fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+    for (int stage = 0; stage < 2; ++stage) {
+        glActiveTexture(GL_TEXTURE0 + stage);
+        if (m_boundTextures[stage] && m_boundTextures[stage]->GetGLTexture()) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, m_boundTextures[stage]->GetGLTexture());
+            glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
+            // Apply texture stage transformation
+            glMatrixMode(GL_TEXTURE);
+            glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_TEXTURE0 + stage]);
+            glMatrixMode(GL_MODELVIEW);
+
+            if (numTex == 0) {
+                // If texture is bound but vertex has no texcoords (e.g. terrain splat), enable eye-linear texgen
+                glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
+                glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
+                glEnable(GL_TEXTURE_GEN_S);
+                glEnable(GL_TEXTURE_GEN_T);
+            } else {
+                glDisable(GL_TEXTURE_GEN_S);
+                glDisable(GL_TEXTURE_GEN_T);
+            }
+        } else {
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glDisable(GL_TEXTURE_2D);
+            glDisable(GL_TEXTURE_GEN_S);
+            glDisable(GL_TEXTURE_GEN_T);
+        }
+    }
+    glActiveTexture(GL_TEXTURE0);
+}
+
+static inline void SetupVertexArrays(const BYTE* vbData, UINT stride, DWORD fvf)
+{
+    DWORD posType = fvf & D3DFVF_POSITION_MASK;
+    size_t offset = 0;
+
+    glEnableClientState(GL_VERTEX_ARRAY);
+    if (posType == D3DFVF_XYZRHW) {
+        glVertexPointer(4, GL_FLOAT, stride, vbData + offset);
+        offset += 16;
+    } else {
+        glVertexPointer(3, GL_FLOAT, stride, vbData + offset);
+        offset += 12;
+    }
+
+    if (fvf & D3DFVF_NORMAL) {
+        glEnableClientState(GL_NORMAL_ARRAY);
+        glNormalPointer(GL_FLOAT, stride, vbData + offset);
+        offset += 12;
+    } else {
+        glDisableClientState(GL_NORMAL_ARRAY);
+    }
+
+    if (fvf & D3DFVF_PSIZE) {
+        offset += 4;
+    }
+
+    if (fvf & D3DFVF_DIFFUSE) {
+        glEnableClientState(GL_COLOR_ARRAY);
+        glColorPointer(4, GL_BGRA, stride, vbData + offset);
+        offset += 4;
+    } else {
+        glDisableClientState(GL_COLOR_ARRAY);
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    }
+
+    if (fvf & D3DFVF_SPECULAR) {
+        offset += 4;
+    }
+
+    UINT numTex = (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+    if (numTex >= 1) {
+        glClientActiveTexture(GL_TEXTURE0);
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        glTexCoordPointer(2, GL_FLOAT, stride, vbData + offset);
+        offset += 8;
+    } else {
+        glClientActiveTexture(GL_TEXTURE0);
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    }
+
+    if (numTex >= 2) {
+        glClientActiveTexture(GL_TEXTURE1);
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        glTexCoordPointer(2, GL_FLOAT, stride, vbData + offset);
+        offset += 8;
+    } else {
+        glClientActiveTexture(GL_TEXTURE1);
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    }
+    glClientActiveTexture(GL_TEXTURE0);
+}
+
+static inline void TeardownVertexArrays(DWORD fvf)
+{
+    glDisableClientState(GL_VERTEX_ARRAY);
+    if (fvf & D3DFVF_NORMAL) glDisableClientState(GL_NORMAL_ARRAY);
+    if (fvf & D3DFVF_DIFFUSE) glDisableClientState(GL_COLOR_ARRAY);
+    UINT numTex = (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+    if (numTex >= 1) {
+        glClientActiveTexture(GL_TEXTURE0);
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    }
+    if (numTex >= 2) {
+        glClientActiveTexture(GL_TEXTURE1);
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    }
+    glClientActiveTexture(GL_TEXTURE0);
+    glDisable(GL_TEXTURE_GEN_S);
+    glDisable(GL_TEXTURE_GEN_T);
 }
 
 HRESULT IDirect3DDevice9::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount)
 {
     if (!m_streams[0].vb) return S_OK;
 
+    UINT stride = m_streams[0].stride ? m_streams[0].stride : D3DXGetFVFVertexSize(m_fvf);
+    if (!stride) stride = 24;
     const BYTE* vbData = (const BYTE*)m_streams[0].vb->GetData() + m_streams[0].offset;
-    UINT stride = m_streams[0].stride ? m_streams[0].stride : 24;
 
-    SetupGL2DState(m_viewport, m_boundTextures[0], m_srcBlend, m_destBlend);
+    SetupGLState();
+    SetupVertexArrays(vbData, stride, m_fvf);
 
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glVertexPointer(3, GL_FLOAT, stride, vbData);
-
-    bool hasDiffuse = (m_fvf & D3DFVF_DIFFUSE) != 0;
-    bool hasTex = (m_fvf & D3DFVF_TEX1) != 0;
-
-    if (hasDiffuse) {
-        glEnableClientState(GL_COLOR_ARRAY);
-        glColorPointer(GL_BGRA, GL_UNSIGNED_BYTE, stride, vbData + 12);
-    } else {
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-    }
-
-    if (hasTex) {
-        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-        glTexCoordPointer(2, GL_FLOAT, stride, vbData + (hasDiffuse ? 16 : 12));
-    }
-
-    GLenum glMode = GL_TRIANGLES;
-    UINT vtxCount = PrimitiveCount * 3;
-    if (PrimitiveType == D3DPT_TRIANGLESTRIP) { glMode = GL_TRIANGLE_STRIP; vtxCount = PrimitiveCount + 2; }
-    else if (PrimitiveType == D3DPT_LINELIST) { glMode = GL_LINES; vtxCount = PrimitiveCount * 2; }
-    else if (PrimitiveType == D3DPT_LINESTRIP) { glMode = GL_LINE_STRIP; vtxCount = PrimitiveCount + 1; }
-    else if (PrimitiveType == D3DPT_POINTLIST) { glMode = GL_POINTS; vtxCount = PrimitiveCount; }
+    GLenum glMode = ToGLPrimitive(PrimitiveType);
+    UINT vtxCount = PrimitiveCountToVertexCount(PrimitiveType, PrimitiveCount);
 
     glDrawArrays(glMode, StartVertex, vtxCount);
 
-    glDisableClientState(GL_VERTEX_ARRAY);
-    if (hasDiffuse) glDisableClientState(GL_COLOR_ARRAY);
-    if (hasTex) glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-
+    TeardownVertexArrays(m_fvf);
     return S_OK;
 }
 
-HRESULT IDirect3DDevice9::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveType, INT, UINT, UINT, UINT StartIndex, UINT PrimitiveCount)
+HRESULT IDirect3DDevice9::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT /*MinIndex*/, UINT /*NumVertices*/, UINT StartIndex, UINT PrimitiveCount)
 {
     if (!m_streams[0].vb || !m_pIndexBuffer) return S_OK;
 
-    const BYTE* vbData = (const BYTE*)m_streams[0].vb->GetData() + m_streams[0].offset;
-    UINT stride = m_streams[0].stride ? m_streams[0].stride : 24;
+    UINT stride = m_streams[0].stride ? m_streams[0].stride : D3DXGetFVFVertexSize(m_fvf);
+    if (!stride) stride = 24;
+    const BYTE* vbData = (const BYTE*)m_streams[0].vb->GetData() + m_streams[0].offset + (BaseVertexIndex * stride);
     const WORD* ibData = (const WORD*)m_pIndexBuffer->GetData() + StartIndex;
 
-    SetupGL2DState(m_viewport, m_boundTextures[0], m_srcBlend, m_destBlend);
+    SetupGLState();
+    SetupVertexArrays(vbData, stride, m_fvf);
 
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glVertexPointer(3, GL_FLOAT, stride, vbData);
-
-    bool hasDiffuse = (m_fvf & D3DFVF_DIFFUSE) != 0;
-    bool hasTex = (m_fvf & D3DFVF_TEX1) != 0;
-
-    if (hasDiffuse) {
-        glEnableClientState(GL_COLOR_ARRAY);
-        glColorPointer(GL_BGRA, GL_UNSIGNED_BYTE, stride, vbData + 12);
-    } else {
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-    }
-
-    if (hasTex) {
-        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-        glTexCoordPointer(2, GL_FLOAT, stride, vbData + (hasDiffuse ? 16 : 12));
-    }
-
-    GLenum glMode = GL_TRIANGLES;
-    UINT indexCount = PrimitiveCount * 3;
-    if (PrimitiveType == D3DPT_TRIANGLESTRIP) { glMode = GL_TRIANGLE_STRIP; indexCount = PrimitiveCount + 2; }
-    else if (PrimitiveType == D3DPT_LINELIST) { glMode = GL_LINES; indexCount = PrimitiveCount * 2; }
-    else if (PrimitiveType == D3DPT_LINESTRIP) { glMode = GL_LINE_STRIP; indexCount = PrimitiveCount + 1; }
-    else if (PrimitiveType == D3DPT_POINTLIST) { glMode = GL_POINTS; indexCount = PrimitiveCount; }
+    GLenum glMode = ToGLPrimitive(PrimitiveType);
+    UINT indexCount = PrimitiveCountToVertexCount(PrimitiveType, PrimitiveCount);
 
     glDrawElements(glMode, indexCount, GL_UNSIGNED_SHORT, ibData);
 
-    glDisableClientState(GL_VERTEX_ARRAY);
-    if (hasDiffuse) glDisableClientState(GL_COLOR_ARRAY);
-    if (hasTex) glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-
+    TeardownVertexArrays(m_fvf);
     return S_OK;
 }
 
@@ -347,86 +596,40 @@ HRESULT IDirect3DDevice9::DrawPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType, UINT P
 {
     if (!pVertexStreamZeroData) return S_OK;
 
+    UINT stride = VertexStreamZeroStride ? VertexStreamZeroStride : D3DXGetFVFVertexSize(m_fvf);
+    if (!stride) stride = 24;
     const BYTE* vbData = (const BYTE*)pVertexStreamZeroData;
-    UINT stride = VertexStreamZeroStride ? VertexStreamZeroStride : 24;
 
-    SetupGL2DState(m_viewport, m_boundTextures[0], m_srcBlend, m_destBlend);
+    SetupGLState();
+    SetupVertexArrays(vbData, stride, m_fvf);
 
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glVertexPointer(3, GL_FLOAT, stride, vbData);
-
-    bool hasDiffuse = (m_fvf & D3DFVF_DIFFUSE) != 0;
-    bool hasTex = (m_fvf & D3DFVF_TEX1) != 0;
-
-    if (hasDiffuse) {
-        glEnableClientState(GL_COLOR_ARRAY);
-        glColorPointer(GL_BGRA, GL_UNSIGNED_BYTE, stride, vbData + 12);
-    } else {
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-    }
-
-    if (hasTex) {
-        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-        glTexCoordPointer(2, GL_FLOAT, stride, vbData + (hasDiffuse ? 16 : 12));
-    }
-
-    GLenum glMode = GL_TRIANGLES;
-    UINT vtxCount = PrimitiveCount * 3;
-    if (PrimitiveType == D3DPT_TRIANGLESTRIP) { glMode = GL_TRIANGLE_STRIP; vtxCount = PrimitiveCount + 2; }
-    else if (PrimitiveType == D3DPT_LINELIST) { glMode = GL_LINES; vtxCount = PrimitiveCount * 2; }
-    else if (PrimitiveType == D3DPT_LINESTRIP) { glMode = GL_LINE_STRIP; vtxCount = PrimitiveCount + 1; }
-    else if (PrimitiveType == D3DPT_POINTLIST) { glMode = GL_POINTS; vtxCount = PrimitiveCount; }
+    GLenum glMode = ToGLPrimitive(PrimitiveType);
+    UINT vtxCount = PrimitiveCountToVertexCount(PrimitiveType, PrimitiveCount);
 
     glDrawArrays(glMode, 0, vtxCount);
 
-    glDisableClientState(GL_VERTEX_ARRAY);
-    if (hasDiffuse) glDisableClientState(GL_COLOR_ARRAY);
-    if (hasTex) glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-
+    TeardownVertexArrays(m_fvf);
     return S_OK;
 }
 
-HRESULT IDirect3DDevice9::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType, UINT, UINT, UINT PrimitiveCount, const void* pIndexData, D3DFORMAT IndexDataFormat, const void* pVertexStreamZeroData, UINT VertexStreamZeroStride)
+HRESULT IDirect3DDevice9::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType, UINT /*MinVertexIndex*/, UINT /*NumVertexIndices*/, UINT PrimitiveCount, const void* pIndexData, D3DFORMAT IndexDataFormat, const void* pVertexStreamZeroData, UINT VertexStreamZeroStride)
 {
     if (!pVertexStreamZeroData || !pIndexData) return S_OK;
 
+    UINT stride = VertexStreamZeroStride ? VertexStreamZeroStride : D3DXGetFVFVertexSize(m_fvf);
+    if (!stride) stride = 24;
     const BYTE* vbData = (const BYTE*)pVertexStreamZeroData;
-    UINT stride = VertexStreamZeroStride ? VertexStreamZeroStride : 24;
 
-    SetupGL2DState(m_viewport, m_boundTextures[0], m_srcBlend, m_destBlend);
+    SetupGLState();
+    SetupVertexArrays(vbData, stride, m_fvf);
 
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glVertexPointer(3, GL_FLOAT, stride, vbData);
-
-    bool hasDiffuse = (m_fvf & D3DFVF_DIFFUSE) != 0;
-    bool hasTex = (m_fvf & D3DFVF_TEX1) != 0;
-
-    if (hasDiffuse) {
-        glEnableClientState(GL_COLOR_ARRAY);
-        glColorPointer(GL_BGRA, GL_UNSIGNED_BYTE, stride, vbData + 12);
-    } else {
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-    }
-
-    if (hasTex) {
-        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-        glTexCoordPointer(2, GL_FLOAT, stride, vbData + (hasDiffuse ? 16 : 12));
-    }
-
-    GLenum glMode = GL_TRIANGLES;
-    UINT indexCount = PrimitiveCount * 3;
-    if (PrimitiveType == D3DPT_TRIANGLESTRIP) { glMode = GL_TRIANGLE_STRIP; indexCount = PrimitiveCount + 2; }
-    else if (PrimitiveType == D3DPT_LINELIST) { glMode = GL_LINES; indexCount = PrimitiveCount * 2; }
-    else if (PrimitiveType == D3DPT_LINESTRIP) { glMode = GL_LINE_STRIP; indexCount = PrimitiveCount + 1; }
-    else if (PrimitiveType == D3DPT_POINTLIST) { glMode = GL_POINTS; indexCount = PrimitiveCount; }
+    GLenum glMode = ToGLPrimitive(PrimitiveType);
+    UINT indexCount = PrimitiveCountToVertexCount(PrimitiveType, PrimitiveCount);
 
     GLenum idxType = (IndexDataFormat == D3DFMT_INDEX32) ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
     glDrawElements(glMode, indexCount, idxType, pIndexData);
 
-    glDisableClientState(GL_VERTEX_ARRAY);
-    if (hasDiffuse) glDisableClientState(GL_COLOR_ARRAY);
-    if (hasTex) glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-
+    TeardownVertexArrays(m_fvf);
     return S_OK;
 }
 

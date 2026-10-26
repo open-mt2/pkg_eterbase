@@ -1806,7 +1806,7 @@ public:
     HRESULT SetDepthStencilSurface(IDirect3DSurface9*) { return S_OK; }
     HRESULT BeginScene() { return S_OK; }
     HRESULT EndScene() { return S_OK; }
-    HRESULT Clear(DWORD, const void*, DWORD, D3DCOLOR, float, DWORD) { return S_OK; }
+    HRESULT Clear(DWORD Count, const RECT* pRects, DWORD Flags, D3DCOLOR Color, float Z, DWORD Stencil);
     HRESULT SetTransform(D3DTRANSFORMSTATETYPE State, const D3DMATRIX* pMatrix) {
         if (pMatrix && (unsigned)State < 512) m_transforms[State] = *pMatrix;
         return S_OK;
@@ -1826,13 +1826,16 @@ public:
     HRESULT GetLight(DWORD, D3DLIGHT9*) { return S_OK; }
     HRESULT LightEnable(DWORD, BOOL) { return S_OK; }
     HRESULT SetRenderState(D3DRENDERSTATETYPE State, DWORD Value);
-    HRESULT GetRenderState(D3DRENDERSTATETYPE, DWORD*) { return S_OK; }
+    HRESULT GetRenderState(D3DRENDERSTATETYPE State, DWORD* pValue);
     HRESULT SetTexture(DWORD Stage, IDirect3DBaseTexture9* pTexture);
     HRESULT GetTexture(DWORD Stage, IDirect3DBaseTexture9** ppTexture);
     HRESULT SetTextureStageState(DWORD, D3DTEXTURESTAGESTATETYPE, DWORD) { return S_OK; }
     HRESULT GetTextureStageState(DWORD, D3DTEXTURESTAGESTATETYPE, DWORD*) { return S_OK; }
-    HRESULT SetSamplerState(DWORD, D3DSAMPLERSTATETYPE, DWORD) { return S_OK; }
-    HRESULT GetSamplerState(DWORD, D3DSAMPLERSTATETYPE, DWORD*) { return S_OK; }
+    HRESULT SetSamplerState(DWORD Stage, D3DSAMPLERSTATETYPE Type, DWORD Value);
+    HRESULT GetSamplerState(DWORD Stage, D3DSAMPLERSTATETYPE Type, DWORD* pValue) {
+        if (pValue) *pValue = 0;
+        return S_OK;
+    }
     HRESULT SetSoftwareVertexProcessing(BOOL) { return S_OK; }
     HRESULT SetVertexDeclaration(IDirect3DVertexDeclaration9*) { return S_OK; }
     HRESULT GetVertexDeclaration(IDirect3DVertexDeclaration9**) { return S_OK; }
@@ -1893,8 +1896,19 @@ public:
 
     DWORD GetSrcBlend() const { return m_srcBlend; }
     DWORD GetDestBlend() const { return m_destBlend; }
+    bool  GetZEnable() const { return m_zEnable; }
+    bool  GetZWriteEnable() const { return m_zWriteEnable; }
+    DWORD GetZFunc() const { return m_zFunc; }
+    bool  GetAlphaBlendEnable() const { return m_alphaBlendEnable; }
+    bool  GetAlphaTestEnable() const { return m_alphaTestEnable; }
+    DWORD GetAlphaRef() const { return m_alphaRef; }
+    DWORD GetAlphaFunc() const { return m_alphaFunc; }
+    DWORD GetCullMode() const { return m_cullMode; }
+    DWORD GetFillMode() const { return m_fillMode; }
 
 private:
+    void SetupGLState();
+
     StreamSource           m_streams[16];
     IDirect3DIndexBuffer9* m_pIndexBuffer;
     IDirect3DTexture9*     m_boundTextures[8];
@@ -1902,6 +1916,15 @@ private:
     D3DVIEWPORT9           m_viewport;
     DWORD                  m_srcBlend;
     DWORD                  m_destBlend;
+    bool                   m_zEnable;
+    bool                   m_zWriteEnable;
+    DWORD                  m_zFunc;
+    bool                   m_alphaBlendEnable;
+    bool                   m_alphaTestEnable;
+    DWORD                  m_alphaRef;
+    DWORD                  m_alphaFunc;
+    DWORD                  m_cullMode;
+    DWORD                  m_fillMode;
     D3DXMATRIX             m_transforms[512];
 };
 typedef IDirect3DDevice9* LPDIRECT3DDEVICE9;
