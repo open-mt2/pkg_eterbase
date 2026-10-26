@@ -102,49 +102,17 @@ void SetEterExceptionHandler()
 #include <unistd.h>
 #include <execinfo.h>
 
-#include <ucontext.h>
-
-static void PosixSignalHandler(int sig, siginfo_t* info, void* ucontext)
+static void PosixSignalHandler(int sig)
 {
 	FILE* f = fopen("ErrorLog.txt", "wt");
 	if (f)
 	{
-		fprintf(f, "Fatal Signal: %d, faulting address: %p\n", sig, info ? info->si_addr : nullptr);
-		if (ucontext)
-		{
-			ucontext_t* uc = (ucontext_t*)ucontext;
-#if defined(__x86_64__)
-			fprintf(f, "RIP: 0x%llx, RSP: 0x%llx, RBP: 0x%llx\n",
-				(unsigned long long)uc->uc_mcontext.gregs[REG_RIP],
-				(unsigned long long)uc->uc_mcontext.gregs[REG_RSP],
-				(unsigned long long)uc->uc_mcontext.gregs[REG_RBP]);
-			fprintf(f, "RAX: 0x%llx, RBX: 0x%llx, RCX: 0x%llx, RDX: 0x%llx\n",
-				(unsigned long long)uc->uc_mcontext.gregs[REG_RAX],
-				(unsigned long long)uc->uc_mcontext.gregs[REG_RBX],
-				(unsigned long long)uc->uc_mcontext.gregs[REG_RCX],
-				(unsigned long long)uc->uc_mcontext.gregs[REG_RDX]);
-			fprintf(f, "RSI: 0x%llx, RDI: 0x%llx\n",
-				(unsigned long long)uc->uc_mcontext.gregs[REG_RSI],
-				(unsigned long long)uc->uc_mcontext.gregs[REG_RDI]);
-
-			// Dump top 24 words on stack
-			uintptr_t* sp = (uintptr_t*)uc->uc_mcontext.gregs[REG_RSP];
-			if (sp)
-			{
-				fprintf(f, "Stack dump:\n");
-				for (int i = 0; i < 24; ++i)
-				{
-					fprintf(f, "  [%02d] %p: 0x%016lx\n", i, (void*)&sp[i], (unsigned long)sp[i]);
-				}
-			}
-#endif
-		}
+		fprintf(f, "Fatal Signal: %d\n", sig);
 		void* buffer[64];
 		int nptrs = backtrace(buffer, 64);
 		char** strings = backtrace_symbols(buffer, nptrs);
 		if (strings)
 		{
-			fprintf(f, "Backtrace:\n");
 			for (int i = 0; i < nptrs; ++i)
 				fprintf(f, "%s\n", strings[i]);
 			free(strings);
@@ -158,8 +126,7 @@ void SetEterExceptionHandler()
 {
 	struct sigaction sa;
 	memset(&sa, 0, sizeof(sa));
-	sa.sa_flags = SA_SIGINFO;
-	sa.sa_sigaction = PosixSignalHandler;
+	sa.sa_handler = PosixSignalHandler;
 	sigaction(SIGSEGV, &sa, NULL);
 	sigaction(SIGABRT, &sa, NULL);
 	sigaction(SIGFPE, &sa, NULL);
