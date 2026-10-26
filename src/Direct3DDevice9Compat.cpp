@@ -374,22 +374,23 @@ void IDirect3DDevice9::SetupGLState()
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
     } else {
-        // Ortho 2D (Metin2 UI) vs 3D Perspective
-        bool isOrtho2D = (m_transforms[D3DTS_PROJECTION]._44 != 0.0f && m_transforms[D3DTS_PROJECTION]._22 < 0.0f);
-        if (isOrtho2D) {
-            glMatrixMode(GL_PROJECTION);
-            glLoadIdentity();
-            // Half-pixel offset compensation for D3D9 texels
-            glOrtho(-0.5, (double)m_viewport.Width - 0.5, (double)m_viewport.Height - 0.5, -0.5, -1000.0, 1000.0);
-            glMatrixMode(GL_MODELVIEW);
-            glLoadIdentity();
-        } else {
+        // Direct3D 3D Perspective projection has _44 == 0.0f (due to perspective divide)
+        // Orthographic (UI) has _44 == 1.0f
+        bool isPerspective = (m_transforms[D3DTS_PROJECTION]._44 == 0.0f);
+        if (isPerspective) {
             // 3D Perspective Pipeline
             glMatrixMode(GL_PROJECTION);
             glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_PROJECTION]);
             glMatrixMode(GL_MODELVIEW);
             glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_VIEW]);
             glMultMatrixf((const GLfloat*)&m_transforms[D3DTS_WORLD]);
+        } else {
+            // 2D Orthographic Pipeline (UI with half-pixel texel offset)
+            glMatrixMode(GL_PROJECTION);
+            glLoadIdentity();
+            glOrtho(-0.5, (double)m_viewport.Width - 0.5, (double)m_viewport.Height - 0.5, -0.5, -1000.0, 1000.0);
+            glMatrixMode(GL_MODELVIEW);
+            glLoadIdentity();
         }
     }
 
@@ -476,11 +477,10 @@ static inline void SetupVertexArrays(const BYTE* vbData, UINT stride, DWORD fvf)
     size_t offset = 0;
 
     glEnableClientState(GL_VERTEX_ARRAY);
+    glVertexPointer(3, GL_FLOAT, stride, vbData + offset);
     if (posType == D3DFVF_XYZRHW) {
-        glVertexPointer(4, GL_FLOAT, stride, vbData + offset);
         offset += 16;
     } else {
-        glVertexPointer(3, GL_FLOAT, stride, vbData + offset);
         offset += 12;
     }
 
@@ -498,7 +498,7 @@ static inline void SetupVertexArrays(const BYTE* vbData, UINT stride, DWORD fvf)
 
     if (fvf & D3DFVF_DIFFUSE) {
         glEnableClientState(GL_COLOR_ARRAY);
-        glColorPointer(4, GL_BGRA, stride, vbData + offset);
+        glColorPointer(GL_BGRA, GL_UNSIGNED_BYTE, stride, vbData + offset);
         offset += 4;
     } else {
         glDisableClientState(GL_COLOR_ARRAY);
@@ -553,7 +553,7 @@ static inline void TeardownVertexArrays(DWORD fvf)
 
 HRESULT IDirect3DDevice9::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount)
 {
-    if (!m_streams[0].vb) return S_OK;
+    if (!m_streams[0].vb || !m_streams[0].vb->GetData()) return S_OK;
 
     UINT stride = m_streams[0].stride ? m_streams[0].stride : D3DXGetFVFVertexSize(m_fvf);
     if (!stride) stride = 24;
@@ -574,6 +574,7 @@ HRESULT IDirect3DDevice9::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType, UINT Sta
 HRESULT IDirect3DDevice9::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT /*MinIndex*/, UINT /*NumVertices*/, UINT StartIndex, UINT PrimitiveCount)
 {
     if (!m_streams[0].vb || !m_pIndexBuffer) return S_OK;
+    if (!m_streams[0].vb->GetData() || !m_pIndexBuffer->GetData()) return S_OK;
 
     UINT stride = m_streams[0].stride ? m_streams[0].stride : D3DXGetFVFVertexSize(m_fvf);
     if (!stride) stride = 24;
