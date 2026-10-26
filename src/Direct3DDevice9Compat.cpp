@@ -1,5 +1,13 @@
 #include <Platform/DirectXMathCompat.h>
 
+// Force link ImageLoaderCompat.cpp from static libEterBase.a
+extern bool Platform_GetImageInfo(const void* data, size_t size, uint32_t* outW, uint32_t* outH, uint32_t* outFormat);
+extern bool Platform_DecodeImage(const void* data, size_t size, uint32_t* outW, uint32_t* outH, std::vector<uint8_t>& outPixels);
+void* g_pfnForceLinkImageLoader[] = {
+    (void*)&Platform_GetImageInfo,
+    (void*)&Platform_DecodeImage
+};
+
 #if defined(__LINUX__)
 #include <GL/gl.h>
 #include <algorithm>
@@ -80,6 +88,7 @@ void IDirect3DTexture9::UploadToGL()
     glBindTexture(GL_TEXTURE_2D, m_glTextureId);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // Default to GL_CLAMP_TO_EDGE (prevent texture edge bleeding)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -225,7 +234,8 @@ static inline void SetupGL2DState(const D3DVIEWPORT9& vp, IDirect3DTexture9* bou
 {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho(0.0, vp.Width, vp.Height, 0.0, -1000.0, 1000.0);
+    // Compensate for DX9 half-pixel offset (-0.5f in vertex coordinates)
+    glOrtho(-0.5, (double)vp.Width - 0.5, (double)vp.Height - 0.5, -0.5, -1000.0, 1000.0);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
