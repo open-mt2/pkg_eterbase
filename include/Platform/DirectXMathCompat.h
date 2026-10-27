@@ -1454,6 +1454,31 @@ inline D3DXQUATERNION* D3DXQuaternionMultiply(D3DXQUATERNION* pOut, const D3DXQU
     return pOut;
 }
 
+inline D3DXQUATERNION* D3DXQuaternionSlerp(D3DXQUATERNION* pOut, const D3DXQUATERNION* pQ1, const D3DXQUATERNION* pQ2, float t) {
+    if (!pOut || !pQ1 || !pQ2) return nullptr;
+    float dot = pQ1->x * pQ2->x + pQ1->y * pQ2->y + pQ1->z * pQ2->z + pQ1->w * pQ2->w;
+    float sign = 1.0f;
+    if (dot < 0.0f) {
+        dot = -dot;
+        sign = -1.0f;
+    }
+    float scale0, scale1;
+    if (dot > 0.9995f) {
+        scale0 = 1.0f - t;
+        scale1 = t * sign;
+    } else {
+        float theta = std::acos(std::clamp(dot, -1.0f, 1.0f));
+        float sinTheta = std::sin(theta);
+        scale0 = std::sin((1.0f - t) * theta) / sinTheta;
+        scale1 = std::sin(t * theta) / sinTheta * sign;
+    }
+    pOut->x = scale0 * pQ1->x + scale1 * pQ2->x;
+    pOut->y = scale0 * pQ1->y + scale1 * pQ2->y;
+    pOut->z = scale0 * pQ1->z + scale1 * pQ2->z;
+    pOut->w = scale0 * pQ1->w + scale1 * pQ2->w;
+    return pOut;
+}
+
 inline float D3DXPlaneDotCoord(const D3DXPLANE* pP, const D3DXVECTOR3* pV) {
     if (!pP || !pV) return 0.0f;
     return pP->a * pV->x + pP->b * pV->y + pP->c * pV->z + pP->d;

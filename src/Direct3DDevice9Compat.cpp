@@ -88,9 +88,9 @@ void IDirect3DTexture9::UploadToGL()
     glBindTexture(GL_TEXTURE_2D, m_glTextureId);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    // Default to GL_CLAMP_TO_EDGE (prevent texture edge bleeding)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // Default to GL_REPEAT (D3D9 D3DTADDRESS_WRAP default)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
     if (m_format == D3DFMT_DXT1) {
         GLsizei size = (GLsizei)(std::max(1u, (m_width + 3) / 4) * std::max(1u, (m_height + 3) / 4) * 8);
