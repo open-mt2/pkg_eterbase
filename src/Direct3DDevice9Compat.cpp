@@ -39,11 +39,11 @@ void* g_pfnForceLinkImageLoader[] = {
 // IDirect3DTexture9 Implementation
 // =============================================================
 
-IDirect3DTexture9::IDirect3DTexture9(UINT w, UINT h, D3DFORMAT fmt)
+IDirect3DTexture9::IDirect3DTexture9(UINT w, UINT h, D3DFORMAT fmt, UINT /*levels*/)
     : m_width(w ? w : 1), m_height(h ? h : 1), m_format(fmt), m_glTextureId(0), m_dirty(false)
 {
-    size_t bpp = GetFormatBytesPerPixel(fmt);
-    m_data.resize(m_width * m_height * (bpp ? bpp : 4), 0);
+    size_t sz = GetLevelDataSize(0);
+    m_data.resize(sz ? sz : 4, 0);
 }
 
 IDirect3DTexture9::~IDirect3DTexture9()
@@ -62,11 +62,46 @@ GLuint IDirect3DTexture9::GetGLTexture()
     return m_glTextureId;
 }
 
-HRESULT IDirect3DTexture9::LockRect(UINT, D3DLOCKED_RECT* pLockedRect, const RECT*, DWORD)
+size_t IDirect3DTexture9::GetLevelDataSize(UINT level) const
+{
+    UINT mipW = std::max(1u, m_width >> level);
+    UINT mipH = std::max(1u, m_height >> level);
+    if (m_format == D3DFMT_DXT1) {
+        return (size_t)std::max(1u, (mipW + 3) / 4) * std::max(1u, (mipH + 3) / 4) * 8;
+    }
+    if (m_format == D3DFMT_DXT3 || m_format == D3DFMT_DXT5) {
+        return (size_t)std::max(1u, (mipW + 3) / 4) * std::max(1u, (mipH + 3) / 4) * 16;
+    }
+    if (m_format == D3DFMT_A4R4G4B4 || m_format == D3DFMT_A1R5G5B5 || m_format == D3DFMT_R5G6B5) {
+        return (size_t)mipW * mipH * 2;
+    }
+    return (size_t)mipW * mipH * 4;
+}
+
+INT IDirect3DTexture9::GetPitch(UINT level) const
+{
+    UINT mipW = std::max(1u, m_width >> level);
+    if (m_format == D3DFMT_DXT1) return (INT)(std::max(1u, (mipW + 3) / 4) * 8);
+    if (m_format == D3DFMT_DXT3 || m_format == D3DFMT_DXT5) return (INT)(std::max(1u, (mipW + 3) / 4) * 16);
+    if (m_format == D3DFMT_A4R4G4B4 || m_format == D3DFMT_A1R5G5B5 || m_format == D3DFMT_R5G6B5) return (INT)(mipW * 2);
+    return (INT)(mipW * 4);
+}
+
+HRESULT IDirect3DTexture9::LockRect(UINT Level, D3DLOCKED_RECT* pLockedRect, const RECT*, DWORD)
 {
     if (!pLockedRect) return E_INVALIDARG;
-    pLockedRect->Pitch = GetPitch();
-    pLockedRect->pBits = m_data.data();
+    if (Level == 0) {
+        size_t sz = GetLevelDataSize(0);
+        if (m_data.size() < sz) m_data.resize(sz, 0);
+        pLockedRect->Pitch = GetPitch(0);
+        pLockedRect->pBits = m_data.data();
+    } else {
+        size_t sz = GetLevelDataSize(Level);
+        auto& mip = m_mipLevels[Level];
+        if (mip.size() < sz) mip.resize(sz, 0);
+        pLockedRect->Pitch = GetPitch(Level);
+        pLockedRect->pBits = mip.data();
+    }
     m_dirty = true;
     return S_OK;
 }
@@ -75,6 +110,41 @@ HRESULT IDirect3DTexture9::UnlockRect(UINT)
 {
     UploadToGL();
     return S_OK;
+}
+
+void IDirect3DTexture9::UploadLevelToGL(UINT level, const BYTE* pBytes, size_t dataSize)
+{
+    if (!pBytes || dataSize <= 0) return;
+    UINT mipW = std::max(1u, m_width >> level);
+    UINT mipH = std::max(1u, m_height >> level);
+
+    if (m_format == D3DFMT_DXT1) {
+        GLsizei size = (GLsizei)(std::max(1u, (mipW + 3) / 4) * std::max(1u, (mipH + 3) / 4) * 8);
+        if (size > dataSize) size = dataSize;
+        glCompressedTexImage2D(GL_TEXTURE_2D, level, GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, mipW, mipH, 0, size, pBytes);
+    } else if (m_format == D3DFMT_DXT3) {
+        GLsizei size = (GLsizei)(std::max(1u, (mipW + 3) / 4) * std::max(1u, (mipH + 3) / 4) * 16);
+        if (size > dataSize) size = dataSize;
+        glCompressedTexImage2D(GL_TEXTURE_2D, level, GL_COMPRESSED_RGBA_S3TC_DXT3_EXT, mipW, mipH, 0, size, pBytes);
+    } else if (m_format == D3DFMT_DXT5) {
+        GLsizei size = (GLsizei)(std::max(1u, (mipW + 3) / 4) * std::max(1u, (mipH + 3) / 4) * 16);
+        if (size > dataSize) size = dataSize;
+        glCompressedTexImage2D(GL_TEXTURE_2D, level, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, mipW, mipH, 0, size, pBytes);
+    } else if (m_format == D3DFMT_A4R4G4B4) {
+        std::vector<uint32_t> rgba(mipW * mipH);
+        const uint16_t* src = (const uint16_t*)pBytes;
+        for (size_t i = 0; i < rgba.size(); ++i) {
+            uint16_t val = src[i];
+            uint8_t a = (val >> 12) & 0xF; a = (a << 4) | a;
+            uint8_t r = (val >> 8) & 0xF;  r = (r << 4) | r;
+            uint8_t g = (val >> 4) & 0xF;  g = (g << 4) | g;
+            uint8_t b = val & 0xF;         b = (b << 4) | b;
+            rgba[i] = (a << 24) | (b << 16) | (g << 8) | r;
+        }
+        glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA, mipW, mipH, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    } else {
+        glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA, mipW, mipH, 0, GL_BGRA, GL_UNSIGNED_BYTE, pBytes);
+    }
 }
 
 void IDirect3DTexture9::UploadToGL()
@@ -86,48 +156,33 @@ void IDirect3DTexture9::UploadToGL()
     if (!m_glTextureId) return;
 
     glBindTexture(GL_TEXTURE_2D, m_glTextureId);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    // Default to GL_REPEAT (D3D9 D3DTADDRESS_WRAP default)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-    if (m_format == D3DFMT_DXT1) {
-        GLsizei size = (GLsizei)(std::max(1u, (m_width + 3) / 4) * std::max(1u, (m_height + 3) / 4) * 8);
-        if (size > (GLsizei)m_data.size()) size = (GLsizei)m_data.size();
-        glCompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, m_width, m_height, 0, size, m_data.data());
-    } else if (m_format == D3DFMT_DXT3) {
-        GLsizei size = (GLsizei)(std::max(1u, (m_width + 3) / 4) * std::max(1u, (m_height + 3) / 4) * 16);
-        if (size > (GLsizei)m_data.size()) size = (GLsizei)m_data.size();
-        glCompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_S3TC_DXT3_EXT, m_width, m_height, 0, size, m_data.data());
-    } else if (m_format == D3DFMT_DXT5) {
-        GLsizei size = (GLsizei)(std::max(1u, (m_width + 3) / 4) * std::max(1u, (m_height + 3) / 4) * 16);
-        if (size > (GLsizei)m_data.size()) size = (GLsizei)m_data.size();
-        glCompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, m_width, m_height, 0, size, m_data.data());
-    } else if (m_format == D3DFMT_A4R4G4B4) {
-        std::vector<uint32_t> rgba(m_width * m_height);
-        const uint16_t* src = (const uint16_t*)m_data.data();
-        for (size_t i = 0; i < rgba.size(); ++i) {
-            uint16_t val = src[i];
-            uint8_t a = (val >> 12) & 0xF; a = (a << 4) | a;
-            uint8_t r = (val >> 8) & 0xF;  r = (r << 4) | r;
-            uint8_t g = (val >> 4) & 0xF;  g = (g << 4) | g;
-            uint8_t b = val & 0xF;         b = (b << 4) | b;
-            rgba[i] = (a << 24) | (b << 16) | (g << 8) | r;
+    // Upload Level 0
+    UploadLevelToGL(0, m_data.data(), (GLsizei)m_data.size());
+
+    // Upload any other mip levels
+    UINT maxLevel = 0;
+    for (const auto& kv : m_mipLevels) {
+        UINT level = kv.first;
+        if (level > 0 && !kv.second.empty()) {
+            UploadLevelToGL(level, kv.second.data(), (GLsizei)kv.second.size());
+            if (level > maxLevel) maxLevel = level;
         }
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, m_width, m_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-    } else {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, m_width, m_height, 0, GL_BGRA, GL_UNSIGNED_BYTE, m_data.data());
     }
-    m_dirty = false;
-}
 
-INT IDirect3DTexture9::GetPitch() const
-{
-    if (m_format == D3DFMT_DXT1) return (INT)(std::max(1u, (m_width + 3) / 4) * 8);
-    if (m_format == D3DFMT_DXT3 || m_format == D3DFMT_DXT5) return (INT)(std::max(1u, (m_width + 3) / 4) * 16);
-    if (m_format == D3DFMT_A4R4G4B4 || m_format == D3DFMT_A1R5G5B5 || m_format == D3DFMT_R5G6B5) return (INT)(m_width * 2);
-    return (INT)(m_width * 4);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, maxLevel);
+    if (maxLevel > 0) {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    } else {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    m_dirty = false;
 }
 
 size_t IDirect3DTexture9::GetFormatBytesPerPixel(D3DFORMAT fmt)
@@ -161,7 +216,15 @@ IDirect3DDevice9::IDirect3DDevice9()
     m_viewport.Width = 1024;
     m_viewport.Height = 768;
     m_viewport.MaxZ = 1.0f;
-    for (int i = 0; i < 8; ++i) m_boundTextures[i] = nullptr;
+    for (int i = 0; i < 8; ++i) {
+        m_boundTextures[i] = nullptr;
+        m_texTransformFlags[i] = D3DTTFF_DISABLE;
+        m_samplerStates[i].addressU = D3DTADDRESS_WRAP;
+        m_samplerStates[i].addressV = D3DTADDRESS_WRAP;
+        m_samplerStates[i].minFilter = D3DTEXF_LINEAR;
+        m_samplerStates[i].magFilter = D3DTEXF_LINEAR;
+        m_samplerStates[i].mipFilter = D3DTEXF_LINEAR;
+    }
     for (int i = 0; i < 512; ++i) D3DXMatrixIdentity(&m_transforms[i]);
 }
 
@@ -262,23 +325,69 @@ HRESULT IDirect3DDevice9::GetRenderState(D3DRENDERSTATETYPE State, DWORD* pValue
     return S_OK;
 }
 
+HRESULT IDirect3DDevice9::SetTextureStageState(DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value)
+{
+    if (Stage < 8) {
+        if (Type == D3DTSS_TEXTURETRANSFORMFLAGS) {
+            m_texTransformFlags[Stage] = Value;
+        }
+    }
+    return S_OK;
+}
+
+HRESULT IDirect3DDevice9::GetTextureStageState(DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD* pValue)
+{
+    if (!pValue) return E_INVALIDARG;
+    if (Stage < 8) {
+        if (Type == D3DTSS_TEXTURETRANSFORMFLAGS) {
+            *pValue = m_texTransformFlags[Stage];
+            return S_OK;
+        }
+    }
+    *pValue = 0;
+    return S_OK;
+}
+
 HRESULT IDirect3DDevice9::SetSamplerState(DWORD Stage, D3DSAMPLERSTATETYPE Type, DWORD Value)
 {
     if (Stage < 8) {
-        glActiveTexture(GL_TEXTURE0 + Stage);
         if (Type == D3DSAMP_ADDRESSU) {
-            GLint wrap = (Value == D3DTADDRESS_WRAP) ? GL_REPEAT : GL_CLAMP_TO_EDGE;
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap);
+            m_samplerStates[Stage].addressU = Value;
         } else if (Type == D3DSAMP_ADDRESSV) {
-            GLint wrap = (Value == D3DTADDRESS_WRAP) ? GL_REPEAT : GL_CLAMP_TO_EDGE;
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap);
+            m_samplerStates[Stage].addressV = Value;
         } else if (Type == D3DSAMP_MAGFILTER) {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (Value == D3DTEXF_POINT) ? GL_NEAREST : GL_LINEAR);
+            m_samplerStates[Stage].magFilter = Value;
         } else if (Type == D3DSAMP_MINFILTER) {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (Value == D3DTEXF_POINT) ? GL_NEAREST : GL_LINEAR);
+            m_samplerStates[Stage].minFilter = Value;
+        } else if (Type == D3DSAMP_MIPFILTER) {
+            m_samplerStates[Stage].mipFilter = Value;
         }
-        glActiveTexture(GL_TEXTURE0);
     }
+    return S_OK;
+}
+
+HRESULT IDirect3DDevice9::GetSamplerState(DWORD Stage, D3DSAMPLERSTATETYPE Type, DWORD* pValue)
+{
+    if (!pValue) return E_INVALIDARG;
+    if (Stage < 8) {
+        if (Type == D3DSAMP_ADDRESSU) {
+            *pValue = m_samplerStates[Stage].addressU;
+            return S_OK;
+        } else if (Type == D3DSAMP_ADDRESSV) {
+            *pValue = m_samplerStates[Stage].addressV;
+            return S_OK;
+        } else if (Type == D3DSAMP_MAGFILTER) {
+            *pValue = m_samplerStates[Stage].magFilter;
+            return S_OK;
+        } else if (Type == D3DSAMP_MINFILTER) {
+            *pValue = m_samplerStates[Stage].minFilter;
+            return S_OK;
+        } else if (Type == D3DSAMP_MIPFILTER) {
+            *pValue = m_samplerStates[Stage].mipFilter;
+            return S_OK;
+        }
+    }
+    *pValue = 0;
     return S_OK;
 }
 
@@ -446,9 +555,37 @@ void IDirect3DDevice9::SetupGLState()
             glBindTexture(GL_TEXTURE_2D, m_boundTextures[stage]->GetGLTexture());
             glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
-            // Apply texture stage transformation
+            // Apply texture sampler states
+            bool hasMips = m_boundTextures[stage]->HasMipMaps();
+            if (m_samplerStates[stage].addressU == D3DTADDRESS_CLAMP) {
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            } else if (m_samplerStates[stage].addressU == D3DTADDRESS_WRAP && hasMips) {
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            }
+            if (m_samplerStates[stage].addressV == D3DTADDRESS_CLAMP) {
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            } else if (m_samplerStates[stage].addressV == D3DTADDRESS_WRAP && hasMips) {
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+            }
+
+            GLint mag = (m_samplerStates[stage].magFilter == D3DTEXF_POINT) ? GL_NEAREST : GL_LINEAR;
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag);
+
+            if (hasMips) {
+                GLint min = (m_samplerStates[stage].minFilter == D3DTEXF_POINT) ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR;
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min);
+            } else {
+                GLint min = (m_samplerStates[stage].minFilter == D3DTEXF_POINT) ? GL_NEAREST : GL_LINEAR;
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min);
+            }
+
+            // Apply texture stage transformation if enabled
             glMatrixMode(GL_TEXTURE);
-            glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_TEXTURE0 + stage]);
+            if ((m_texTransformFlags[stage] & ~D3DTTFF_PROJECTED) != D3DTTFF_DISABLE) {
+                glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_TEXTURE0 + stage]);
+            } else {
+                glLoadIdentity();
+            }
             glMatrixMode(GL_MODELVIEW);
 
             if (numTex == 0) {
