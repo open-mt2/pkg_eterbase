@@ -499,7 +499,8 @@ void IDirect3DDevice9::SetupGLState()
             glLoadIdentity();
             glOrtho(-0.5, (double)m_viewport.Width - 0.5, (double)m_viewport.Height - 0.5, -0.5, -1000.0, 1000.0);
             glMatrixMode(GL_MODELVIEW);
-            glLoadIdentity();
+            glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_VIEW]);
+            glMultMatrixf((const GLfloat*)&m_transforms[D3DTS_WORLD]);
         }
     }
 
@@ -588,8 +589,8 @@ void IDirect3DDevice9::SetupGLState()
             }
             glMatrixMode(GL_MODELVIEW);
 
-            if (numTex == 0) {
-                // If texture is bound but vertex has no texcoords (e.g. terrain splat), enable eye-linear texgen
+            if (stage >= (int)numTex) {
+                // If texture is bound but vertex has no texcoords for this stage (e.g. terrain splat, minimap circular mask), enable eye-linear texgen
                 glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
                 glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
                 glEnable(GL_TEXTURE_GEN_S);
