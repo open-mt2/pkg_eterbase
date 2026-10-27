@@ -894,6 +894,18 @@
         GetPlatformWindowState().mouseX = x;
         GetPlatformWindowState().mouseY = y;
     }
+    typedef void (*Platform_WarpMouseCallback)(int x, int y);
+    inline Platform_WarpMouseCallback& Platform_GetWarpMouseCallback() {
+        static Platform_WarpMouseCallback s_cb = nullptr;
+        return s_cb;
+    }
+    inline void Platform_SetWarpMouseCallback(Platform_WarpMouseCallback cb) {
+        Platform_GetWarpMouseCallback() = cb;
+    }
+    inline void Platform_WarpMouse(int x, int y) {
+        auto cb = Platform_GetWarpMouseCallback();
+        if (cb) cb(x, y);
+    }
     inline void Platform_SetWindowResolution(int w, int h) {
         GetPlatformWindowState().windowWidth = w;
         GetPlatformWindowState().windowHeight = h;
@@ -1402,7 +1414,11 @@
     inline BOOL DestroyCursor(HCURSOR) { return TRUE; }
     inline int ShowCursor(BOOL) { return 0; }
     inline HCURSOR SetCursor(HCURSOR) { return nullptr; }
-    inline BOOL SetCursorPos(int, int) { return TRUE; }
+    inline BOOL SetCursorPos(int x, int y) {
+        Platform_WarpMouse(x, y);
+        Platform_SetCursorPos(x, y);
+        return TRUE;
+    }
     inline BOOL SetFileAttributes(LPCSTR, DWORD) { return TRUE; }
 
     // Windows Virtual Key Definitions
