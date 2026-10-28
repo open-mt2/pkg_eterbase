@@ -173,13 +173,11 @@ void IDirect3DTexture9::UploadToGL()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, maxLevel);
     if (maxLevel > 0) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     } else {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     m_dirty = false;
@@ -224,6 +222,12 @@ IDirect3DDevice9::IDirect3DDevice9()
         m_samplerStates[i].minFilter = D3DTEXF_LINEAR;
         m_samplerStates[i].magFilter = D3DTEXF_LINEAR;
         m_samplerStates[i].mipFilter = D3DTEXF_LINEAR;
+        m_texStageStates[i].colorOp = (i == 0) ? D3DTOP_MODULATE : D3DTOP_DISABLE;
+        m_texStageStates[i].colorArg1 = D3DTA_TEXTURE;
+        m_texStageStates[i].colorArg2 = D3DTA_CURRENT;
+        m_texStageStates[i].alphaOp = (i == 0) ? D3DTOP_SELECTARG1 : D3DTOP_DISABLE;
+        m_texStageStates[i].alphaArg1 = D3DTA_TEXTURE;
+        m_texStageStates[i].alphaArg2 = D3DTA_CURRENT;
     }
     for (int i = 0; i < 512; ++i) D3DXMatrixIdentity(&m_transforms[i]);
 }
@@ -330,6 +334,18 @@ HRESULT IDirect3DDevice9::SetTextureStageState(DWORD Stage, D3DTEXTURESTAGESTATE
     if (Stage < 8) {
         if (Type == D3DTSS_TEXTURETRANSFORMFLAGS) {
             m_texTransformFlags[Stage] = Value;
+        } else if (Type == D3DTSS_COLOROP) {
+            m_texStageStates[Stage].colorOp = Value;
+        } else if (Type == D3DTSS_COLORARG1) {
+            m_texStageStates[Stage].colorArg1 = Value;
+        } else if (Type == D3DTSS_COLORARG2) {
+            m_texStageStates[Stage].colorArg2 = Value;
+        } else if (Type == D3DTSS_ALPHAOP) {
+            m_texStageStates[Stage].alphaOp = Value;
+        } else if (Type == D3DTSS_ALPHAARG1) {
+            m_texStageStates[Stage].alphaArg1 = Value;
+        } else if (Type == D3DTSS_ALPHAARG2) {
+            m_texStageStates[Stage].alphaArg2 = Value;
         }
     }
     return S_OK;
@@ -341,6 +357,24 @@ HRESULT IDirect3DDevice9::GetTextureStageState(DWORD Stage, D3DTEXTURESTAGESTATE
     if (Stage < 8) {
         if (Type == D3DTSS_TEXTURETRANSFORMFLAGS) {
             *pValue = m_texTransformFlags[Stage];
+            return S_OK;
+        } else if (Type == D3DTSS_COLOROP) {
+            *pValue = m_texStageStates[Stage].colorOp;
+            return S_OK;
+        } else if (Type == D3DTSS_COLORARG1) {
+            *pValue = m_texStageStates[Stage].colorArg1;
+            return S_OK;
+        } else if (Type == D3DTSS_COLORARG2) {
+            *pValue = m_texStageStates[Stage].colorArg2;
+            return S_OK;
+        } else if (Type == D3DTSS_ALPHAOP) {
+            *pValue = m_texStageStates[Stage].alphaOp;
+            return S_OK;
+        } else if (Type == D3DTSS_ALPHAARG1) {
+            *pValue = m_texStageStates[Stage].alphaArg1;
+            return S_OK;
+        } else if (Type == D3DTSS_ALPHAARG2) {
+            *pValue = m_texStageStates[Stage].alphaArg2;
             return S_OK;
         }
     }
@@ -551,21 +585,69 @@ void IDirect3DDevice9::SetupGLState()
     UINT numTex = (m_fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
     for (int stage = 0; stage < 2; ++stage) {
         glActiveTexture(GL_TEXTURE0 + stage);
+
+        // If this texture stage is disabled or no texture is bound, disable it
+        if (m_texStageStates[stage].colorOp == D3DTOP_DISABLE && m_texStageStates[stage].alphaOp == D3DTOP_DISABLE) {
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glDisable(GL_TEXTURE_2D);
+            glDisable(GL_TEXTURE_GEN_S);
+            glDisable(GL_TEXTURE_GEN_T);
+            continue;
+        }
+
         if (m_boundTextures[stage] && m_boundTextures[stage]->GetGLTexture()) {
             glEnable(GL_TEXTURE_2D);
             glBindTexture(GL_TEXTURE_2D, m_boundTextures[stage]->GetGLTexture());
-            glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
+            // Handle texture combine / environment mode
+            DWORD colorOp = m_texStageStates[stage].colorOp;
+            DWORD alphaOp = m_texStageStates[stage].alphaOp;
+            DWORD colorArg1 = m_texStageStates[stage].colorArg1;
+            DWORD alphaArg1 = m_texStageStates[stage].alphaArg1;
+
+            if (colorOp == D3DTOP_SELECTARG1 && colorArg1 == D3DTA_CURRENT) {
+                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+                glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
+                glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, GL_PREVIOUS);
+                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, GL_SRC_COLOR);
+            } else if (colorOp == D3DTOP_SELECTARG1 && colorArg1 == D3DTA_TEXTURE) {
+                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+                glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
+                glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, GL_TEXTURE);
+                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, GL_SRC_COLOR);
+            } else if (colorOp == D3DTOP_ADD) {
+                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+                glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_ADD);
+                glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, GL_PREVIOUS);
+                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, GL_SRC_COLOR);
+                glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_RGB, GL_TEXTURE);
+                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB, GL_SRC_COLOR);
+            } else {
+                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+            }
+
+            if (alphaOp == D3DTOP_SELECTARG1 && alphaArg1 == D3DTA_TEXTURE) {
+                glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_REPLACE);
+                glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, GL_TEXTURE);
+                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_ALPHA, GL_SRC_ALPHA);
+            } else if (alphaOp == D3DTOP_MODULATE) {
+                glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_MODULATE);
+                glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, GL_PREVIOUS);
+                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_ALPHA, GL_SRC_ALPHA);
+                glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_ALPHA, GL_TEXTURE);
+                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_ALPHA, GL_SRC_ALPHA);
+            }
 
             // Apply texture sampler states
             bool hasMips = m_boundTextures[stage]->HasMipMaps();
             if (m_samplerStates[stage].addressU == D3DTADDRESS_CLAMP) {
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            } else if (m_samplerStates[stage].addressU == D3DTADDRESS_WRAP && hasMips) {
+            } else {
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
             }
             if (m_samplerStates[stage].addressV == D3DTADDRESS_CLAMP) {
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            } else if (m_samplerStates[stage].addressV == D3DTADDRESS_WRAP && hasMips) {
+            } else {
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
             }
 

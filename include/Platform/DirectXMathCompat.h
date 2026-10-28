@@ -1947,10 +1947,20 @@ private:
         DWORD mipFilter;
     };
 
+    struct TextureStageState {
+        DWORD colorOp;
+        DWORD colorArg1;
+        DWORD colorArg2;
+        DWORD alphaOp;
+        DWORD alphaArg1;
+        DWORD alphaArg2;
+    };
+
     StreamSource           m_streams[16];
     IDirect3DIndexBuffer9* m_pIndexBuffer;
     IDirect3DTexture9*     m_boundTextures[8];
     SamplerStageState      m_samplerStates[8];
+    TextureStageState      m_texStageStates[8];
     DWORD                  m_texTransformFlags[8];
     DWORD                  m_fvf;
     D3DVIEWPORT9           m_viewport;
