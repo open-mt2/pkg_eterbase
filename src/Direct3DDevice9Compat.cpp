@@ -34,6 +34,37 @@ void* g_pfnForceLinkImageLoader[] = {
 #ifndef GL_TEXTURE0
 #define GL_TEXTURE0 0x84C0
 #endif
+#ifndef GL_CONSTANT
+#define GL_CONSTANT 0x8576
+#endif
+#ifndef GL_PRIMARY_COLOR
+#define GL_PRIMARY_COLOR 0x8577
+#endif
+#ifndef GL_PREVIOUS
+#define GL_PREVIOUS 0x8578
+#endif
+#ifndef GL_COMBINE
+#define GL_COMBINE 0x8570
+#define GL_COMBINE_RGB 0x8571
+#define GL_COMBINE_ALPHA 0x8572
+#define GL_SRC0_RGB 0x8580
+#define GL_SRC1_RGB 0x8581
+#define GL_SRC2_RGB 0x8582
+#define GL_SRC0_ALPHA 0x8588
+#define GL_SRC1_ALPHA 0x8589
+#define GL_SRC2_ALPHA 0x858A
+#define GL_OPERAND0_RGB 0x8590
+#define GL_OPERAND1_RGB 0x8591
+#define GL_OPERAND2_RGB 0x8592
+#define GL_OPERAND0_ALPHA 0x8598
+#define GL_OPERAND1_ALPHA 0x8599
+#define GL_OPERAND2_ALPHA 0x859A
+#define GL_RGB_SCALE 0x8573
+#define GL_ALPHA_SCALE 0x0D1C
+#define GL_ADD_SIGNED 0x8574
+#define GL_INTERPOLATE 0x8575
+#define GL_SUBTRACT 0x84E7
+#endif
 
 // =============================================================
 // IDirect3DTexture9 Implementation
@@ -208,26 +239,34 @@ IDirect3DDevice9::IDirect3DDevice9()
       m_zEnable(false), m_zWriteEnable(true), m_zFunc(D3DCMP_LESSEQUAL),
       m_alphaBlendEnable(false), m_alphaTestEnable(false),
       m_alphaRef(0), m_alphaFunc(D3DCMP_ALWAYS),
-      m_cullMode(D3DCULL_CCW), m_fillMode(D3DFILL_SOLID)
+      m_cullMode(D3DCULL_CCW), m_fillMode(D3DFILL_SOLID),
+      m_textureFactor(0xFFFFFFFF), m_lighting(0), m_colorVertex(0), m_ambient(0)
 {
     std::memset(&m_viewport, 0, sizeof(m_viewport));
     m_viewport.Width = 1024;
     m_viewport.Height = 768;
     m_viewport.MaxZ = 1.0f;
+    std::memset(&m_material, 0, sizeof(m_material));
+    m_material.Diffuse.r = m_material.Diffuse.g = m_material.Diffuse.b = m_material.Diffuse.a = 1.0f;
+    m_material.Ambient.r = m_material.Ambient.g = m_material.Ambient.b = m_material.Ambient.a = 1.0f;
     for (int i = 0; i < 8; ++i) {
         m_boundTextures[i] = nullptr;
         m_texTransformFlags[i] = D3DTTFF_DISABLE;
+        m_texCoordIndex[i] = (DWORD)i;
         m_samplerStates[i].addressU = D3DTADDRESS_WRAP;
         m_samplerStates[i].addressV = D3DTADDRESS_WRAP;
         m_samplerStates[i].minFilter = D3DTEXF_LINEAR;
         m_samplerStates[i].magFilter = D3DTEXF_LINEAR;
         m_samplerStates[i].mipFilter = D3DTEXF_LINEAR;
         m_texStageStates[i].colorOp = (i == 0) ? D3DTOP_MODULATE : D3DTOP_DISABLE;
+        m_texStageStates[i].colorArg0 = D3DTA_CURRENT;
         m_texStageStates[i].colorArg1 = D3DTA_TEXTURE;
         m_texStageStates[i].colorArg2 = D3DTA_CURRENT;
         m_texStageStates[i].alphaOp = (i == 0) ? D3DTOP_SELECTARG1 : D3DTOP_DISABLE;
+        m_texStageStates[i].alphaArg0 = D3DTA_CURRENT;
         m_texStageStates[i].alphaArg1 = D3DTA_TEXTURE;
         m_texStageStates[i].alphaArg2 = D3DTA_CURRENT;
+        m_texStageStates[i].resultArg = 0;
     }
     for (int i = 0; i < 512; ++i) D3DXMatrixIdentity(&m_transforms[i]);
 }
@@ -303,6 +342,18 @@ HRESULT IDirect3DDevice9::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value)
         case D3DRS_FILLMODE:
             m_fillMode = Value;
             break;
+        case D3DRS_TEXTUREFACTOR:
+            m_textureFactor = Value;
+            break;
+        case D3DRS_LIGHTING:
+            m_lighting = Value;
+            break;
+        case D3DRS_COLORVERTEX:
+            m_colorVertex = Value;
+            break;
+        case D3DRS_AMBIENT:
+            m_ambient = Value;
+            break;
         default:
             break;
     }
@@ -324,6 +375,10 @@ HRESULT IDirect3DDevice9::GetRenderState(D3DRENDERSTATETYPE State, DWORD* pValue
         case D3DRS_ALPHAFUNC: *pValue = m_alphaFunc; break;
         case D3DRS_CULLMODE: *pValue = m_cullMode; break;
         case D3DRS_FILLMODE: *pValue = m_fillMode; break;
+        case D3DRS_TEXTUREFACTOR: *pValue = m_textureFactor; break;
+        case D3DRS_LIGHTING: *pValue = m_lighting; break;
+        case D3DRS_COLORVERTEX: *pValue = m_colorVertex; break;
+        case D3DRS_AMBIENT: *pValue = m_ambient; break;
         default: *pValue = 0; break;
     }
     return S_OK;
@@ -334,18 +389,26 @@ HRESULT IDirect3DDevice9::SetTextureStageState(DWORD Stage, D3DTEXTURESTAGESTATE
     if (Stage < 8) {
         if (Type == D3DTSS_TEXTURETRANSFORMFLAGS) {
             m_texTransformFlags[Stage] = Value;
+        } else if (Type == D3DTSS_TEXCOORDINDEX) {
+            m_texCoordIndex[Stage] = Value;
         } else if (Type == D3DTSS_COLOROP) {
             m_texStageStates[Stage].colorOp = Value;
+        } else if (Type == D3DTSS_COLORARG0) {
+            m_texStageStates[Stage].colorArg0 = Value;
         } else if (Type == D3DTSS_COLORARG1) {
             m_texStageStates[Stage].colorArg1 = Value;
         } else if (Type == D3DTSS_COLORARG2) {
             m_texStageStates[Stage].colorArg2 = Value;
         } else if (Type == D3DTSS_ALPHAOP) {
             m_texStageStates[Stage].alphaOp = Value;
+        } else if (Type == D3DTSS_ALPHAARG0) {
+            m_texStageStates[Stage].alphaArg0 = Value;
         } else if (Type == D3DTSS_ALPHAARG1) {
             m_texStageStates[Stage].alphaArg1 = Value;
         } else if (Type == D3DTSS_ALPHAARG2) {
             m_texStageStates[Stage].alphaArg2 = Value;
+        } else if (Type == D3DTSS_RESULTARG) {
+            m_texStageStates[Stage].resultArg = Value;
         }
     }
     return S_OK;
@@ -358,8 +421,14 @@ HRESULT IDirect3DDevice9::GetTextureStageState(DWORD Stage, D3DTEXTURESTAGESTATE
         if (Type == D3DTSS_TEXTURETRANSFORMFLAGS) {
             *pValue = m_texTransformFlags[Stage];
             return S_OK;
+        } else if (Type == D3DTSS_TEXCOORDINDEX) {
+            *pValue = m_texCoordIndex[Stage];
+            return S_OK;
         } else if (Type == D3DTSS_COLOROP) {
             *pValue = m_texStageStates[Stage].colorOp;
+            return S_OK;
+        } else if (Type == D3DTSS_COLORARG0) {
+            *pValue = m_texStageStates[Stage].colorArg0;
             return S_OK;
         } else if (Type == D3DTSS_COLORARG1) {
             *pValue = m_texStageStates[Stage].colorArg1;
@@ -370,11 +439,17 @@ HRESULT IDirect3DDevice9::GetTextureStageState(DWORD Stage, D3DTEXTURESTAGESTATE
         } else if (Type == D3DTSS_ALPHAOP) {
             *pValue = m_texStageStates[Stage].alphaOp;
             return S_OK;
+        } else if (Type == D3DTSS_ALPHAARG0) {
+            *pValue = m_texStageStates[Stage].alphaArg0;
+            return S_OK;
         } else if (Type == D3DTSS_ALPHAARG1) {
             *pValue = m_texStageStates[Stage].alphaArg1;
             return S_OK;
         } else if (Type == D3DTSS_ALPHAARG2) {
             *pValue = m_texStageStates[Stage].alphaArg2;
+            return S_OK;
+        } else if (Type == D3DTSS_RESULTARG) {
+            *pValue = m_texStageStates[Stage].resultArg;
             return S_OK;
         }
     }
@@ -505,6 +580,211 @@ static inline UINT PrimitiveCountToVertexCount(D3DPRIMITIVETYPE pt, UINT count)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Direct3D9 fixed-function texture stage emulation
+// ---------------------------------------------------------------------------
+
+static inline GLenum ToGLStageSource(DWORD arg)
+{
+    switch (arg & D3DTA_SELECTMASK) {
+        case D3DTA_TEXTURE:  return GL_TEXTURE;
+        case D3DTA_DIFFUSE:  return GL_PRIMARY_COLOR;
+        case D3DTA_CURRENT:  return GL_PREVIOUS;
+        case D3DTA_TFACTOR:  return GL_CONSTANT;
+        case D3DTA_SPECULAR: return GL_PRIMARY_COLOR;
+        case D3DTA_TEMP:     return GL_PREVIOUS;
+        case D3DTA_CONSTANT: return GL_CONSTANT;
+        default:             return GL_TEXTURE;
+    }
+}
+
+static inline GLenum ToGLColorOperand(DWORD arg)
+{
+    if (arg & D3DTA_ALPHAREPLICATE) return GL_SRC_ALPHA;
+    if (arg & D3DTA_COMPLEMENT)     return GL_ONE_MINUS_SRC_COLOR;
+    return GL_SRC_COLOR;
+}
+
+static inline GLenum ToGLAlphaOperand(DWORD arg)
+{
+    if (arg & D3DTA_COMPLEMENT) return GL_ONE_MINUS_SRC_ALPHA;
+    return GL_SRC_ALPHA;
+}
+
+static void SetStageColorCombine(DWORD op, DWORD arg1, DWORD arg2)
+{
+    const GLenum s0 = ToGLStageSource(arg1);
+    const GLenum s1 = ToGLStageSource(arg2);
+
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+    glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, ToGLColorOperand(arg1));
+    glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB, ToGLColorOperand(arg2));
+    glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND2_RGB, GL_SRC_ALPHA);
+    glTexEnvi(GL_TEXTURE_ENV, GL_RGB_SCALE, 1);
+    switch (op) {
+        case D3DTOP_DISABLE:
+            // Color passes through from the previous stage.
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, GL_PREVIOUS);
+            break;
+        case D3DTOP_SELECTARG1:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, s0);
+            break;
+        case D3DTOP_SELECTARG2:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, s1);
+            break;
+        case D3DTOP_ADD:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_ADD);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, s0);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_RGB, s1);
+            break;
+        case D3DTOP_ADDSIGNED:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_ADD_SIGNED);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, s0);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_RGB, s1);
+            break;
+        case D3DTOP_SUBTRACT:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_SUBTRACT);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, s0);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_RGB, s1);
+            break;
+        case D3DTOP_MODULATE2X:
+        case D3DTOP_MODULATE4X:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_MODULATE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, s0);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_RGB, s1);
+            glTexEnvi(GL_TEXTURE_ENV, GL_RGB_SCALE, (op == D3DTOP_MODULATE2X) ? 2 : 4);
+            break;
+        case D3DTOP_BLENDTEXTUREALPHA:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_INTERPOLATE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, s0);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_RGB, s1);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC2_RGB, GL_TEXTURE);
+            break;
+        case D3DTOP_BLENDCURRENTALPHA:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_INTERPOLATE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, s0);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_RGB, s1);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC2_RGB, GL_PREVIOUS);
+            break;
+        case D3DTOP_BLENDFACTORALPHA:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_INTERPOLATE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, s0);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_RGB, s1);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC2_RGB, GL_CONSTANT);
+            break;
+        case D3DTOP_MODULATEALPHA_ADDCOLOR:
+        case D3DTOP_MODULATECOLOR_ADDALPHA:
+        case D3DTOP_MODULATEINVALPHA_ADDCOLOR:
+        case D3DTOP_MODULATEINVCOLOR_ADDALPHA:
+            // Approximation of the specular "add" stages: current + texture.
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_ADD);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, GL_PREVIOUS);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_RGB, s1);
+            break;
+        default:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_MODULATE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, s0);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_RGB, s1);
+            break;
+    }
+}
+
+static void SetStageAlphaCombine(DWORD op, DWORD arg1, DWORD arg2)
+{
+    const GLenum s0 = ToGLStageSource(arg1);
+    const GLenum s1 = ToGLStageSource(arg2);
+
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+    glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_ALPHA, ToGLAlphaOperand(arg1));
+    glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_ALPHA, ToGLAlphaOperand(arg2));
+    glTexEnvi(GL_TEXTURE_ENV, GL_ALPHA_SCALE, 1);
+
+    switch (op) {
+        case D3DTOP_DISABLE:
+            // Alpha is passed through unchanged.
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_REPLACE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, GL_PREVIOUS);
+            break;
+        case D3DTOP_SELECTARG1:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_REPLACE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, s0);
+            break;
+        case D3DTOP_SELECTARG2:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_REPLACE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, s1);
+            break;
+        case D3DTOP_ADD:
+        case D3DTOP_ADDSIGNED:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_ADD);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, s0);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_ALPHA, s1);
+            break;
+        case D3DTOP_SUBTRACT:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_SUBTRACT);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, s0);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_ALPHA, s1);
+            break;
+        default:
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_MODULATE);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, s0);
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_ALPHA, s1);
+            break;
+    }
+}
+
+// Emulates D3DTSS_TCI_CAMERASPACEPOSITION with GL_EYE_LINEAR.
+// The D3D texture matrix is baked into the eye plane equations so that the
+// generated (s,t) coordinates are identical to the D3D ones, including the
+// eye-space Z and translation terms (which are essential for stable
+// world-space texture coordinates on the terrain).
+static void ApplyCameraSpacePositionTexGen(const D3DXMATRIX* pTexMatrix, bool bProjected)
+{
+    GLfloat s[4], t[4], r[4], q[4];
+    if (pTexMatrix) {
+        s[0] = pTexMatrix->_11; s[1] = pTexMatrix->_21; s[2] = pTexMatrix->_31; s[3] = pTexMatrix->_41;
+        t[0] = pTexMatrix->_12; t[1] = pTexMatrix->_22; t[2] = pTexMatrix->_32; t[3] = pTexMatrix->_42;
+        r[0] = pTexMatrix->_13; r[1] = pTexMatrix->_23; r[2] = pTexMatrix->_33; r[3] = pTexMatrix->_43;
+        q[0] = pTexMatrix->_14; q[1] = pTexMatrix->_24; q[2] = pTexMatrix->_34; q[3] = pTexMatrix->_44;
+    } else {
+        s[0] = 1.0f; s[1] = 0.0f; s[2] = 0.0f; s[3] = 0.0f;
+        t[0] = 0.0f; t[1] = 1.0f; t[2] = 0.0f; t[3] = 0.0f;
+        r[0] = 0.0f; r[1] = 0.0f; r[2] = 1.0f; r[3] = 0.0f;
+        q[0] = 0.0f; q[1] = 0.0f; q[2] = 0.0f; q[3] = 1.0f;
+    }
+
+    // GL transforms the supplied eye plane by the inverse of the modelview
+    // matrix. Specify the planes with an identity modelview so they are stored
+    // verbatim in eye space.
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
+    glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
+    glTexGenfv(GL_S, GL_EYE_PLANE, s);
+    glTexGenfv(GL_T, GL_EYE_PLANE, t);
+
+    if (bProjected) {
+        glTexGeni(GL_R, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
+        glTexGeni(GL_Q, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
+        glTexGenfv(GL_R, GL_EYE_PLANE, r);
+        glTexGenfv(GL_Q, GL_EYE_PLANE, q);
+        glEnable(GL_TEXTURE_GEN_R);
+        glEnable(GL_TEXTURE_GEN_Q);
+    } else {
+        glDisable(GL_TEXTURE_GEN_R);
+        glDisable(GL_TEXTURE_GEN_Q);
+    }
+
+    glPopMatrix();
+
+    glEnable(GL_TEXTURE_GEN_S);
+    glEnable(GL_TEXTURE_GEN_T);
+}
+
 void IDirect3DDevice9::SetupGLState()
 {
     // 1. Matrix Setup
@@ -582,116 +862,104 @@ void IDirect3DDevice9::SetupGLState()
     }
 
     // 7. Textures & Transforms
-    UINT numTex = (m_fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+    const UINT numTex = (m_fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+    const GLfloat texFactor[4] = {
+        ((m_textureFactor >> 16) & 0xFF) / 255.0f,
+        ((m_textureFactor >> 8) & 0xFF) / 255.0f,
+        (m_textureFactor & 0xFF) / 255.0f,
+        ((m_textureFactor >> 24) & 0xFF) / 255.0f
+    };
+
     for (int stage = 0; stage < 2; ++stage) {
         glActiveTexture(GL_TEXTURE0 + stage);
+        glDisable(GL_TEXTURE_GEN_R);
+        glDisable(GL_TEXTURE_GEN_Q);
+
+        const TextureStageState& ss = m_texStageStates[stage];
 
         // If this texture stage is disabled or no texture is bound, disable it
-        if (m_texStageStates[stage].colorOp == D3DTOP_DISABLE && m_texStageStates[stage].alphaOp == D3DTOP_DISABLE) {
+        if ((ss.colorOp == D3DTOP_DISABLE && ss.alphaOp == D3DTOP_DISABLE) ||
+            !m_boundTextures[stage] || !m_boundTextures[stage]->GetGLTexture()) {
             glBindTexture(GL_TEXTURE_2D, 0);
             glDisable(GL_TEXTURE_2D);
             glDisable(GL_TEXTURE_GEN_S);
             glDisable(GL_TEXTURE_GEN_T);
+            glMatrixMode(GL_TEXTURE);
+            glLoadIdentity();
+            glMatrixMode(GL_MODELVIEW);
             continue;
         }
 
-        if (m_boundTextures[stage] && m_boundTextures[stage]->GetGLTexture()) {
-            glEnable(GL_TEXTURE_2D);
-            glBindTexture(GL_TEXTURE_2D, m_boundTextures[stage]->GetGLTexture());
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, m_boundTextures[stage]->GetGLTexture());
 
-            // Handle texture combine / environment mode
-            DWORD colorOp = m_texStageStates[stage].colorOp;
-            DWORD alphaOp = m_texStageStates[stage].alphaOp;
-            DWORD colorArg1 = m_texStageStates[stage].colorArg1;
-            DWORD alphaArg1 = m_texStageStates[stage].alphaArg1;
+        // Texture factor (D3DTA_TFACTOR maps to GL_CONSTANT)
+        glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, texFactor);
 
-            if (colorOp == D3DTOP_SELECTARG1 && colorArg1 == D3DTA_CURRENT) {
-                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
-                glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
-                glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, GL_PREVIOUS);
-                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, GL_SRC_COLOR);
-            } else if (colorOp == D3DTOP_SELECTARG1 && colorArg1 == D3DTA_TEXTURE) {
-                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
-                glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
-                glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, GL_TEXTURE);
-                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, GL_SRC_COLOR);
-            } else if (colorOp == D3DTOP_ADD) {
-                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
-                glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_ADD);
-                glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, GL_PREVIOUS);
-                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, GL_SRC_COLOR);
-                glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_RGB, GL_TEXTURE);
-                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB, GL_SRC_COLOR);
-            } else {
-                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-            }
+        // Fixed-function combine emulation (color + alpha)
+        SetStageColorCombine(ss.colorOp, ss.colorArg1, ss.colorArg2);
+        SetStageAlphaCombine(ss.alphaOp, ss.alphaArg1, ss.alphaArg2);
 
-            if (alphaOp == D3DTOP_SELECTARG1 && alphaArg1 == D3DTA_TEXTURE) {
-                glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_REPLACE);
-                glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, GL_TEXTURE);
-                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_ALPHA, GL_SRC_ALPHA);
-            } else if (alphaOp == D3DTOP_MODULATE) {
-                glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_MODULATE);
-                glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, GL_PREVIOUS);
-                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_ALPHA, GL_SRC_ALPHA);
-                glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_ALPHA, GL_TEXTURE);
-                glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_ALPHA, GL_SRC_ALPHA);
-            }
-
-            // Apply texture sampler states
-            bool hasMips = m_boundTextures[stage]->HasMipMaps();
-            if (m_samplerStates[stage].addressU == D3DTADDRESS_CLAMP) {
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            } else {
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-            }
-            if (m_samplerStates[stage].addressV == D3DTADDRESS_CLAMP) {
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            } else {
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-            }
-
-            GLint mag = (m_samplerStates[stage].magFilter == D3DTEXF_POINT) ? GL_NEAREST : GL_LINEAR;
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag);
-
-            if (hasMips) {
-                GLint min = (m_samplerStates[stage].minFilter == D3DTEXF_POINT) ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR;
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min);
-            } else {
-                GLint min = (m_samplerStates[stage].minFilter == D3DTEXF_POINT) ? GL_NEAREST : GL_LINEAR;
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min);
-            }
-
-            // Apply texture stage transformation if enabled
-            glMatrixMode(GL_TEXTURE);
-            if ((m_texTransformFlags[stage] & ~D3DTTFF_PROJECTED) != D3DTTFF_DISABLE) {
-                glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_TEXTURE0 + stage]);
-            } else {
-                glLoadIdentity();
-            }
-            glMatrixMode(GL_MODELVIEW);
-
-            if (stage >= (int)numTex) {
-                // If texture is bound but vertex has no texcoords for this stage (e.g. terrain splat, minimap circular mask), enable eye-linear texgen
-                glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
-                glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
-                glEnable(GL_TEXTURE_GEN_S);
-                glEnable(GL_TEXTURE_GEN_T);
-            } else {
-                glDisable(GL_TEXTURE_GEN_S);
-                glDisable(GL_TEXTURE_GEN_T);
-            }
+        // Apply texture sampler states
+        bool hasMips = m_boundTextures[stage]->HasMipMaps();
+        if (m_samplerStates[stage].addressU == D3DTADDRESS_CLAMP) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         } else {
-            glBindTexture(GL_TEXTURE_2D, 0);
-            glDisable(GL_TEXTURE_2D);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        }
+        if (m_samplerStates[stage].addressV == D3DTADDRESS_CLAMP) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        } else {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        }
+
+        GLint mag = (m_samplerStates[stage].magFilter == D3DTEXF_POINT) ? GL_NEAREST : GL_LINEAR;
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag);
+
+        if (hasMips) {
+            GLint min = (m_samplerStates[stage].minFilter == D3DTEXF_POINT) ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR;
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min);
+        } else {
+            GLint min = (m_samplerStates[stage].minFilter == D3DTEXF_POINT) ? GL_NEAREST : GL_LINEAR;
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min);
+        }
+
+        // Texture coordinate generation / texture matrix.
+        // In Direct3D, a cameraspace-position TCI produces the full camera-space
+        // position (x, y, z, 1), which is then multiplied by the texture matrix.
+        // Baking that matrix into GL_EYE_LINEAR planes reproduces it exactly.
+        const DWORD tci = m_texCoordIndex[stage];
+        const DWORD tciMode = tci & 0xFFFF0000u;
+        const bool hasTransform = (m_texTransformFlags[stage] & ~D3DTTFF_PROJECTED) != D3DTTFF_DISABLE;
+        const bool isProjected = (m_texTransformFlags[stage] & D3DTTFF_PROJECTED) != 0;
+        const D3DXMATRIX* pTexMatrix = hasTransform ? &m_transforms[D3DTS_TEXTURE0 + stage] : nullptr;
+
+        if (tciMode == D3DTSS_TCI_CAMERASPACEPOSITION) {
+            ApplyCameraSpacePositionTexGen(pTexMatrix, isProjected);
+            glMatrixMode(GL_TEXTURE);
+            glLoadIdentity();
+            glMatrixMode(GL_MODELVIEW);
+        } else if (tciMode == D3DTSS_TCI_PASSTHRU && stage >= (int)numTex) {
+            // No per-vertex texture coordinates for this stage: preserve the
+            // legacy eye-linear behaviour applied through the texture matrix.
+            ApplyCameraSpacePositionTexGen(nullptr, false);
+            glMatrixMode(GL_TEXTURE);
+            if (pTexMatrix) glLoadMatrixf((const GLfloat*)pTexMatrix);
+            else glLoadIdentity();
+            glMatrixMode(GL_MODELVIEW);
+        } else {
             glDisable(GL_TEXTURE_GEN_S);
             glDisable(GL_TEXTURE_GEN_T);
+            glMatrixMode(GL_TEXTURE);
+            if (pTexMatrix) glLoadMatrixf((const GLfloat*)pTexMatrix);
+            else glLoadIdentity();
+            glMatrixMode(GL_MODELVIEW);
         }
     }
     glActiveTexture(GL_TEXTURE0);
 }
 
-static inline void SetupVertexArrays(const BYTE* vbData, UINT stride, DWORD fvf)
+static inline void SetupVertexArrays(const BYTE* vbData, UINT stride, DWORD fvf, const GLfloat* primaryColor)
 {
     DWORD posType = fvf & D3DFVF_POSITION_MASK;
     size_t offset = 0;
@@ -722,7 +990,7 @@ static inline void SetupVertexArrays(const BYTE* vbData, UINT stride, DWORD fvf)
         offset += 4;
     } else {
         glDisableClientState(GL_COLOR_ARRAY);
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        glColor4fv(primaryColor);
     }
 
     if (fvf & D3DFVF_SPECULAR) {
@@ -779,8 +1047,15 @@ HRESULT IDirect3DDevice9::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType, UINT Sta
     if (!stride) stride = 24;
     const BYTE* vbData = (const BYTE*)m_streams[0].vb->GetData() + m_streams[0].offset;
 
+    GLfloat primaryColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    if (m_lighting && !(m_fvf & D3DFVF_DIFFUSE)) {
+        primaryColor[0] = m_material.Diffuse.r;
+        primaryColor[1] = m_material.Diffuse.g;
+        primaryColor[2] = m_material.Diffuse.b;
+        primaryColor[3] = m_material.Diffuse.a;
+    }
     SetupGLState();
-    SetupVertexArrays(vbData, stride, m_fvf);
+    SetupVertexArrays(vbData, stride, m_fvf, primaryColor);
 
     GLenum glMode = ToGLPrimitive(PrimitiveType);
     UINT vtxCount = PrimitiveCountToVertexCount(PrimitiveType, PrimitiveCount);
@@ -801,8 +1076,15 @@ HRESULT IDirect3DDevice9::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveType, I
     const BYTE* vbData = (const BYTE*)m_streams[0].vb->GetData() + m_streams[0].offset + (BaseVertexIndex * stride);
     const WORD* ibData = (const WORD*)m_pIndexBuffer->GetData() + StartIndex;
 
+    GLfloat primaryColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    if (m_lighting && !(m_fvf & D3DFVF_DIFFUSE)) {
+        primaryColor[0] = m_material.Diffuse.r;
+        primaryColor[1] = m_material.Diffuse.g;
+        primaryColor[2] = m_material.Diffuse.b;
+        primaryColor[3] = m_material.Diffuse.a;
+    }
     SetupGLState();
-    SetupVertexArrays(vbData, stride, m_fvf);
+    SetupVertexArrays(vbData, stride, m_fvf, primaryColor);
 
     GLenum glMode = ToGLPrimitive(PrimitiveType);
     UINT indexCount = PrimitiveCountToVertexCount(PrimitiveType, PrimitiveCount);
@@ -821,8 +1103,15 @@ HRESULT IDirect3DDevice9::DrawPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType, UINT P
     if (!stride) stride = 24;
     const BYTE* vbData = (const BYTE*)pVertexStreamZeroData;
 
+    GLfloat primaryColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    if (m_lighting && !(m_fvf & D3DFVF_DIFFUSE)) {
+        primaryColor[0] = m_material.Diffuse.r;
+        primaryColor[1] = m_material.Diffuse.g;
+        primaryColor[2] = m_material.Diffuse.b;
+        primaryColor[3] = m_material.Diffuse.a;
+    }
     SetupGLState();
-    SetupVertexArrays(vbData, stride, m_fvf);
+    SetupVertexArrays(vbData, stride, m_fvf, primaryColor);
 
     GLenum glMode = ToGLPrimitive(PrimitiveType);
     UINT vtxCount = PrimitiveCountToVertexCount(PrimitiveType, PrimitiveCount);
@@ -841,8 +1130,15 @@ HRESULT IDirect3DDevice9::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType,
     if (!stride) stride = 24;
     const BYTE* vbData = (const BYTE*)pVertexStreamZeroData;
 
+    GLfloat primaryColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    if (m_lighting && !(m_fvf & D3DFVF_DIFFUSE)) {
+        primaryColor[0] = m_material.Diffuse.r;
+        primaryColor[1] = m_material.Diffuse.g;
+        primaryColor[2] = m_material.Diffuse.b;
+        primaryColor[3] = m_material.Diffuse.a;
+    }
     SetupGLState();
-    SetupVertexArrays(vbData, stride, m_fvf);
+    SetupVertexArrays(vbData, stride, m_fvf, primaryColor);
 
     GLenum glMode = ToGLPrimitive(PrimitiveType);
     UINT indexCount = PrimitiveCountToVertexCount(PrimitiveType, PrimitiveCount);

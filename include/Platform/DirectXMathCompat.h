@@ -1853,8 +1853,14 @@ public:
         if (pViewport) *pViewport = m_viewport;
         return S_OK;
     }
-    HRESULT SetMaterial(const D3DMATERIAL9*) { return S_OK; }
-    HRESULT GetMaterial(D3DMATERIAL9*) { return S_OK; }
+    HRESULT SetMaterial(const D3DMATERIAL9* pMaterial) {
+        if (pMaterial) m_material = *pMaterial;
+        return S_OK;
+    }
+    HRESULT GetMaterial(D3DMATERIAL9* pMaterial) {
+        if (pMaterial) *pMaterial = m_material;
+        return S_OK;
+    }
     HRESULT SetLight(DWORD, const D3DLIGHT9*) { return S_OK; }
     HRESULT GetLight(DWORD, D3DLIGHT9*) { return S_OK; }
     HRESULT LightEnable(DWORD, BOOL) { return S_OK; }
@@ -1949,11 +1955,14 @@ private:
 
     struct TextureStageState {
         DWORD colorOp;
+        DWORD colorArg0;
         DWORD colorArg1;
         DWORD colorArg2;
         DWORD alphaOp;
+        DWORD alphaArg0;
         DWORD alphaArg1;
         DWORD alphaArg2;
+        DWORD resultArg;
     };
 
     StreamSource           m_streams[16];
@@ -1962,6 +1971,12 @@ private:
     SamplerStageState      m_samplerStates[8];
     TextureStageState      m_texStageStates[8];
     DWORD                  m_texTransformFlags[8];
+    DWORD                  m_texCoordIndex[8];
+    DWORD                  m_textureFactor;
+    DWORD                  m_lighting;
+    DWORD                  m_colorVertex;
+    DWORD                  m_ambient;
+    D3DMATERIAL9           m_material;
     DWORD                  m_fvf;
     D3DVIEWPORT9           m_viewport;
     DWORD                  m_srcBlend;
