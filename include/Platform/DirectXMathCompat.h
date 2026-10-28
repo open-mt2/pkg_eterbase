@@ -1984,6 +1984,14 @@ private:
     DWORD                  m_lighting;
     DWORD                  m_colorVertex;
     DWORD                  m_ambient;
+    bool                   m_fogEnable;
+    DWORD                  m_fogColor;
+    DWORD                  m_fogVertexMode;
+    DWORD                  m_fogTableMode;
+    float                  m_fogStart;
+    float                  m_fogEnd;
+    float                  m_fogDensity;
+    bool                   m_rangeFogEnable;
     D3DMATERIAL9           m_material;
     DWORD                  m_fvf;
     D3DVIEWPORT9           m_viewport;

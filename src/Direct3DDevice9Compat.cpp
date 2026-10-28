@@ -293,7 +293,9 @@ IDirect3DDevice9::IDirect3DDevice9()
       m_alphaBlendEnable(false), m_alphaTestEnable(false),
       m_alphaRef(0), m_alphaFunc(D3DCMP_ALWAYS),
       m_cullMode(D3DCULL_CCW), m_fillMode(D3DFILL_SOLID),
-      m_textureFactor(0xFFFFFFFF), m_lighting(0), m_colorVertex(0), m_ambient(0)
+      m_textureFactor(0xFFFFFFFF), m_lighting(0), m_colorVertex(0), m_ambient(0),
+      m_fogEnable(false), m_fogColor(0), m_fogVertexMode(D3DFOG_NONE), m_fogTableMode(D3DFOG_NONE),
+      m_fogStart(0.0f), m_fogEnd(0.0f), m_fogDensity(1.0f), m_rangeFogEnable(false)
 {
     std::memset(&m_viewport, 0, sizeof(m_viewport));
     m_viewport.Width = 1024;
@@ -408,6 +410,30 @@ HRESULT IDirect3DDevice9::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value)
         case D3DRS_AMBIENT:
             m_ambient = Value;
             break;
+        case D3DRS_FOGENABLE:
+            m_fogEnable = (Value != 0);
+            break;
+        case D3DRS_FOGCOLOR:
+            m_fogColor = Value;
+            break;
+        case D3DRS_FOGVERTEXMODE:
+            m_fogVertexMode = Value;
+            break;
+        case D3DRS_FOGTABLEMODE:
+            m_fogTableMode = Value;
+            break;
+        case D3DRS_FOGSTART:
+            std::memcpy(&m_fogStart, &Value, sizeof(float));
+            break;
+        case D3DRS_FOGEND:
+            std::memcpy(&m_fogEnd, &Value, sizeof(float));
+            break;
+        case D3DRS_FOGDENSITY:
+            std::memcpy(&m_fogDensity, &Value, sizeof(float));
+            break;
+        case D3DRS_RANGEFOGENABLE:
+            m_rangeFogEnable = (Value != 0);
+            break;
         default:
             break;
     }
@@ -433,6 +459,14 @@ HRESULT IDirect3DDevice9::GetRenderState(D3DRENDERSTATETYPE State, DWORD* pValue
         case D3DRS_LIGHTING: *pValue = m_lighting; break;
         case D3DRS_COLORVERTEX: *pValue = m_colorVertex; break;
         case D3DRS_AMBIENT: *pValue = m_ambient; break;
+        case D3DRS_FOGENABLE: *pValue = m_fogEnable ? 1 : 0; break;
+        case D3DRS_FOGCOLOR: *pValue = m_fogColor; break;
+        case D3DRS_FOGVERTEXMODE: *pValue = m_fogVertexMode; break;
+        case D3DRS_FOGTABLEMODE: *pValue = m_fogTableMode; break;
+        case D3DRS_FOGSTART: std::memcpy(pValue, &m_fogStart, sizeof(float)); break;
+        case D3DRS_FOGEND: std::memcpy(pValue, &m_fogEnd, sizeof(float)); break;
+        case D3DRS_FOGDENSITY: std::memcpy(pValue, &m_fogDensity, sizeof(float)); break;
+        case D3DRS_RANGEFOGENABLE: *pValue = m_rangeFogEnable ? 1 : 0; break;
         default: *pValue = 0; break;
     }
     return S_OK;
@@ -848,6 +882,7 @@ void IDirect3DDevice9::SetupGLState()
 {
     // 1. Matrix Setup
     DWORD posType = m_fvf & D3DFVF_POSITION_MASK;
+    bool isPerspective = false;
     if (posType == D3DFVF_XYZRHW) {
         // Pre-transformed 2D screen vertices
         glMatrixMode(GL_PROJECTION);
@@ -858,7 +893,7 @@ void IDirect3DDevice9::SetupGLState()
     } else {
         // Direct3D 3D Perspective projection has _44 == 0.0f (due to perspective divide)
         // Orthographic (UI) has _44 == 1.0f
-        bool isPerspective = (m_transforms[D3DTS_PROJECTION]._44 == 0.0f);
+        isPerspective = (m_transforms[D3DTS_PROJECTION]._44 == 0.0f);
         if (isPerspective) {
             // 3D Perspective Pipeline
             glMatrixMode(GL_PROJECTION);
@@ -902,7 +937,45 @@ void IDirect3DDevice9::SetupGLState()
         glDisable(GL_ALPHA_TEST);
     }
 
-    // 5. Culling
+    // 5. Fog (D3D9 vertex/table fog emulation)
+    // The client enables fog per environment (CMapManager::BeginEnvironment) and
+    // temporarily switches the fog colour to white while drawing multiplicative
+    // shadow passes. GL's fixed-function fog uses the eye-space depth as the fog
+    // coordinate, which matches D3D's non-range vertex fog closely enough.
+    const DWORD fogMode = (m_fogTableMode != D3DFOG_NONE) ? m_fogTableMode : m_fogVertexMode;
+    if (m_fogEnable && isPerspective && fogMode != D3DFOG_NONE &&
+        (fogMode != D3DFOG_LINEAR || m_fogEnd > m_fogStart)) {
+        glEnable(GL_FOG);
+        const GLfloat fogColor[4] = {
+            ((m_fogColor >> 16) & 0xFF) / 255.0f,
+            ((m_fogColor >> 8) & 0xFF) / 255.0f,
+            (m_fogColor & 0xFF) / 255.0f,
+            ((m_fogColor >> 24) & 0xFF) / 255.0f
+        };
+        glFogfv(GL_FOG_COLOR, fogColor);
+        switch (fogMode) {
+            case D3DFOG_LINEAR:
+                glFogi(GL_FOG_MODE, GL_LINEAR);
+                glFogf(GL_FOG_START, m_fogStart);
+                glFogf(GL_FOG_END, m_fogEnd);
+                break;
+            case D3DFOG_EXP:
+                glFogi(GL_FOG_MODE, GL_EXP);
+                glFogf(GL_FOG_DENSITY, m_fogDensity);
+                break;
+            case D3DFOG_EXP2:
+                glFogi(GL_FOG_MODE, GL_EXP2);
+                glFogf(GL_FOG_DENSITY, m_fogDensity);
+                break;
+            default:
+                break;
+        }
+        glHint(GL_FOG_HINT, GL_NICEST);
+    } else {
+        glDisable(GL_FOG);
+    }
+
+    // 6. Culling
     if (m_cullMode == D3DCULL_NONE) {
         glDisable(GL_CULL_FACE);
     } else {
@@ -911,7 +984,7 @@ void IDirect3DDevice9::SetupGLState()
         glCullFace((m_cullMode == D3DCULL_CW) ? GL_FRONT : GL_BACK);
     }
 
-    // 6. Fill Mode
+    // 7. Fill Mode
     if (m_fillMode == D3DFILL_WIREFRAME) {
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     } else if (m_fillMode == D3DFILL_POINT) {
@@ -920,7 +993,7 @@ void IDirect3DDevice9::SetupGLState()
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     }
 
-    // 7. Textures & Transforms
+    // 8. Textures & Transforms
     const UINT numTex = (m_fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
     const GLfloat texFactor[4] = {
         ((m_textureFactor >> 16) & 0xFF) / 255.0f,
