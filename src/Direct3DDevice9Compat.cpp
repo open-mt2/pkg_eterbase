@@ -9,7 +9,11 @@ void* g_pfnForceLinkImageLoader[] = {
 };
 
 #if defined(__LINUX__)
+#ifndef GL_GLEXT_PROTOTYPES
+#define GL_GLEXT_PROTOTYPES 1
+#endif
 #include <GL/gl.h>
+#include <GL/glext.h>
 #include <algorithm>
 #include <cstring>
 
@@ -278,8 +282,43 @@ size_t IDirect3DTexture9::GetFormatBytesPerPixel(D3DFORMAT fmt)
 HRESULT IDirect3DTexture9::GetSurfaceLevel(UINT, IDirect3DSurface9** ppSurfaceLevel)
 {
     if (!ppSurfaceLevel) return E_INVALIDARG;
-    *ppSurfaceLevel = new IDirect3DSurface9(m_width, m_height);
+    *ppSurfaceLevel = new IDirect3DSurface9(m_width, m_height, this);
     return S_OK;
+}
+
+// =============================================================
+// IDirect3DSurface9 Implementation
+// =============================================================
+
+IDirect3DSurface9::IDirect3DSurface9(UINT w, UINT h, IDirect3DTexture9* pTexture,
+                                     bool bDepthStencil, bool bDefault)
+    : m_width(w ? w : 1), m_height(h ? h : 1),
+      m_texture(pTexture), m_bDepthStencil(bDepthStencil), m_bDefault(bDefault),
+      m_depthRenderbuffer(0)
+{
+    // Only plain CPU surfaces need backing storage (LockRect / GetDesc users).
+    // Colour render-target surfaces and depth-stencil surfaces live on the GPU.
+    if (!m_bDepthStencil && !m_texture)
+        m_data.resize((size_t)m_width * m_height * 4, 0);
+}
+
+IDirect3DSurface9::~IDirect3DSurface9()
+{
+    if (m_depthRenderbuffer) {
+        glDeleteRenderbuffers(1, &m_depthRenderbuffer);
+        m_depthRenderbuffer = 0;
+    }
+}
+
+GLuint IDirect3DSurface9::GetDepthRenderbuffer()
+{
+    if (!m_depthRenderbuffer) {
+        glGenRenderbuffers(1, &m_depthRenderbuffer);
+        glBindRenderbuffer(GL_RENDERBUFFER, m_depthRenderbuffer);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, m_width, m_height);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    }
+    return m_depthRenderbuffer;
 }
 
 // =============================================================
@@ -295,7 +334,8 @@ IDirect3DDevice9::IDirect3DDevice9()
       m_cullMode(D3DCULL_CCW), m_fillMode(D3DFILL_SOLID),
       m_textureFactor(0xFFFFFFFF), m_lighting(0), m_colorVertex(0), m_ambient(0),
       m_fogEnable(false), m_fogColor(0), m_fogVertexMode(D3DFOG_NONE), m_fogTableMode(D3DFOG_NONE),
-      m_fogStart(0.0f), m_fogEnd(0.0f), m_fogDensity(1.0f), m_rangeFogEnable(false)
+      m_fogStart(0.0f), m_fogEnd(0.0f), m_fogDensity(1.0f), m_rangeFogEnable(false),
+      m_inRenderTarget(false), m_fbo(0)
 {
     std::memset(&m_viewport, 0, sizeof(m_viewport));
     m_viewport.Width = 1024;
@@ -325,6 +365,162 @@ IDirect3DDevice9::IDirect3DDevice9()
         m_texStageStates[i].resultArg = 0;
     }
     for (int i = 0; i < 512; ++i) D3DXMatrixIdentity(&m_transforms[i]);
+}
+
+IDirect3DDevice9::~IDirect3DDevice9()
+{
+    if (m_fbo) {
+        glDeleteFramebuffers(1, &m_fbo);
+        m_fbo = 0;
+    }
+}
+
+void IDirect3DDevice9::EnsureFramebuffer()
+{
+    if (!m_fbo)
+        glGenFramebuffers(1, &m_fbo);
+}
+
+// Direct3D applies a texture stage's colour operation even when no texture is
+// bound to that stage (an unbound texture behaves as opaque white). The GL
+// fixed-function pipeline instead disables texturing entirely, so the stage
+// result has to be folded into the primary colour. This matters for the
+// character shadow map pass, which draws untextured geometry with
+// COLOROP = SELECTARG1 and COLORARG1 = TFACTOR (a flat grey silhouette).
+bool IDirect3DDevice9::ComputeUntexturedStage0Color(const GLfloat* current, GLfloat* out) const
+{
+    if (m_boundTextures[0])
+        return false;
+
+    const TextureStageState& ss = m_texStageStates[0];
+    if (ss.colorOp == D3DTOP_DISABLE)
+        return false;
+
+    auto readArg = [&](DWORD arg, GLfloat* v) {
+        switch (arg & D3DTA_SELECTMASK) {
+            case D3DTA_TFACTOR:
+                v[0] = ((m_textureFactor >> 16) & 0xFF) / 255.0f;
+                v[1] = ((m_textureFactor >> 8) & 0xFF) / 255.0f;
+                v[2] = (m_textureFactor & 0xFF) / 255.0f;
+                v[3] = ((m_textureFactor >> 24) & 0xFF) / 255.0f;
+                break;
+            case D3DTA_TEXTURE:
+                // Unbound texture reads as opaque white.
+                v[0] = v[1] = v[2] = v[3] = 1.0f;
+                break;
+            default:
+                v[0] = current[0];
+                v[1] = current[1];
+                v[2] = current[2];
+                v[3] = current[3];
+                break;
+        }
+        if (arg & D3DTA_COMPLEMENT) {
+            v[0] = 1.0f - v[0];
+            v[1] = 1.0f - v[1];
+            v[2] = 1.0f - v[2];
+            v[3] = 1.0f - v[3];
+        }
+        if (arg & D3DTA_ALPHAREPLICATE) {
+            v[0] = v[1] = v[2] = v[3];
+        }
+    };
+
+    GLfloat a1[4], a2[4];
+    readArg(ss.colorArg1, a1);
+    readArg(ss.colorArg2, a2);
+
+    switch (ss.colorOp) {
+        case D3DTOP_SELECTARG1:
+            for (int i = 0; i < 4; ++i) out[i] = a1[i];
+            break;
+        case D3DTOP_SELECTARG2:
+            for (int i = 0; i < 4; ++i) out[i] = a2[i];
+            break;
+        case D3DTOP_ADD:
+            for (int i = 0; i < 4; ++i) out[i] = a1[i] + a2[i];
+            break;
+        case D3DTOP_ADDSIGNED:
+            for (int i = 0; i < 4; ++i) out[i] = a1[i] + a2[i] - 0.5f;
+            break;
+        case D3DTOP_SUBTRACT:
+            for (int i = 0; i < 4; ++i) out[i] = a1[i] - a2[i];
+            break;
+        case D3DTOP_MODULATE2X:
+            for (int i = 0; i < 4; ++i) out[i] = a1[i] * a2[i] * 2.0f;
+            break;
+        case D3DTOP_MODULATE4X:
+            for (int i = 0; i < 4; ++i) out[i] = a1[i] * a2[i] * 4.0f;
+            break;
+        case D3DTOP_BLENDTEXTUREALPHA:
+            // Unbound texture alpha is 1: the result is ARG2.
+            for (int i = 0; i < 4; ++i) out[i] = a2[i];
+            break;
+        case D3DTOP_BLENDDIFFUSEALPHA:
+        case D3DTOP_BLENDCURRENTALPHA:
+            for (int i = 0; i < 4; ++i) out[i] = a1[i] + (a2[i] - a1[i]) * current[3];
+            break;
+        case D3DTOP_BLENDFACTORALPHA:
+            for (int i = 0; i < 4; ++i) out[i] = a1[i] + (a2[i] - a1[i]) * current[3];
+            break;
+        case D3DTOP_MODULATE:
+        default:
+            for (int i = 0; i < 4; ++i) out[i] = a1[i] * a2[i];
+            break;
+    }
+
+    for (int i = 0; i < 4; ++i) {
+        if (out[i] < 0.0f) out[i] = 0.0f;
+        if (out[i] > 1.0f) out[i] = 1.0f;
+    }
+    return true;
+}
+
+HRESULT IDirect3DDevice9::SetRenderTarget(DWORD RenderTargetIndex, IDirect3DSurface9* pRenderTarget)
+{
+    if (RenderTargetIndex != 0)
+        return S_OK;
+
+    // Default framebuffer (window back buffer).
+    if (!pRenderTarget || pRenderTarget->IsDefault()) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        m_inRenderTarget = false;
+        return S_OK;
+    }
+
+    if (pRenderTarget->IsDepthStencil())
+        return S_OK;
+
+    IDirect3DTexture9* pTexture = pRenderTarget->GetTexture();
+    if (!pTexture) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        m_inRenderTarget = false;
+        return S_OK;
+    }
+
+    EnsureFramebuffer();
+    glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                              GL_TEXTURE_2D, pTexture->GetGLTexture(), 0);
+    m_inRenderTarget = true;
+    return S_OK;
+}
+
+HRESULT IDirect3DDevice9::SetDepthStencilSurface(IDirect3DSurface9* pZStencilSurface)
+{
+    // The default depth buffer is owned by the window framebuffer.
+    if (!pZStencilSurface || pZStencilSurface->IsDefault())
+        return S_OK;
+
+    if (!pZStencilSurface->IsDepthStencil())
+        return S_OK;
+
+    EnsureFramebuffer();
+    glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                 GL_RENDERBUFFER, pZStencilSurface->GetDepthRenderbuffer());
+    m_inRenderTarget = true;
+    return S_OK;
 }
 
 HRESULT IDirect3DDevice9::Clear(DWORD /*Count*/, const RECT* /*pRects*/, DWORD Flags, D3DCOLOR Color, float Z, DWORD Stencil)
@@ -881,6 +1077,23 @@ static void ApplyCameraSpacePositionTexGen(const D3DXMATRIX* pTexMatrix, bool bP
 void IDirect3DDevice9::SetupGLState()
 {
     // 1. Matrix Setup
+    // When rendering into an FBO we flip the clip-space Y axis. Direct3D render
+    // targets store row 0 at the top, while OpenGL stores the bottom row first;
+    // flipping keeps the resulting texture sampleable with the client's D3D
+    // texture matrices (character shadow map, snow blur, ...).
+    const bool flipY = m_inRenderTarget;
+    // Negate the projection's Y output row (S * M, including translation) so
+    // that D3D's top row lands at texture row 0.
+    auto applyClipYFlip = [flipY]() {
+        if (!flipY) return;
+        GLfloat proj[16];
+        glGetFloatv(GL_PROJECTION_MATRIX, proj);
+        proj[1] = -proj[1];
+        proj[5] = -proj[5];
+        proj[9] = -proj[9];
+        proj[13] = -proj[13];
+        glLoadMatrixf(proj);
+    };
     DWORD posType = m_fvf & D3DFVF_POSITION_MASK;
     bool isPerspective = false;
     if (posType == D3DFVF_XYZRHW) {
@@ -888,28 +1101,30 @@ void IDirect3DDevice9::SetupGLState()
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
         glOrtho(0.0, (double)m_viewport.Width, (double)m_viewport.Height, 0.0, -1000.0, 1000.0);
+        applyClipYFlip();
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
     } else {
-        // Direct3D 3D Perspective projection has _44 == 0.0f (due to perspective divide)
-        // Orthographic (UI) has _44 == 1.0f
-        isPerspective = (m_transforms[D3DTS_PROJECTION]._44 == 0.0f);
-        if (isPerspective) {
-            // 3D Perspective Pipeline
-            glMatrixMode(GL_PROJECTION);
-            glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_PROJECTION]);
-            glMatrixMode(GL_MODELVIEW);
-            glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_VIEW]);
-            glMultMatrixf((const GLfloat*)&m_transforms[D3DTS_WORLD]);
+        // Direct3D 3D perspective projections have _44 == 0.0f (perspective divide).
+        // The client's 2D interface projection (SetOrtho2D) is an off-centre
+        // orthographic matrix with _41/_42 == -1/+1; it needs the half-pixel
+        // screen-space replacement. Centred orthographic projections (shadow
+        // map, SetOrtho3D) must use the matrix supplied by the client.
+        const D3DMATRIX& proj = m_transforms[D3DTS_PROJECTION];
+        isPerspective = (proj._44 == 0.0f);
+        const bool isScreenOrtho = !isPerspective && (proj._41 != 0.0f || proj._42 != 0.0f);
+        glMatrixMode(GL_PROJECTION);
+        if (isPerspective || !isScreenOrtho) {
+            glLoadMatrixf((const GLfloat*)&proj);
         } else {
             // 2D Orthographic Pipeline (UI with half-pixel texel offset)
-            glMatrixMode(GL_PROJECTION);
             glLoadIdentity();
             glOrtho(-0.5, (double)m_viewport.Width - 0.5, (double)m_viewport.Height - 0.5, -0.5, -1000.0, 1000.0);
-            glMatrixMode(GL_MODELVIEW);
-            glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_VIEW]);
-            glMultMatrixf((const GLfloat*)&m_transforms[D3DTS_WORLD]);
         }
+        applyClipYFlip();
+        glMatrixMode(GL_MODELVIEW);
+        glLoadMatrixf((const GLfloat*)&m_transforms[D3DTS_VIEW]);
+        glMultMatrixf((const GLfloat*)&m_transforms[D3DTS_WORLD]);
     }
 
     // 2. Depth Test & Write
@@ -980,7 +1195,9 @@ void IDirect3DDevice9::SetupGLState()
         glDisable(GL_CULL_FACE);
     } else {
         glEnable(GL_CULL_FACE);
-        glFrontFace(GL_CW); // D3D standard front-face is clockwise
+        // D3D's front face is clockwise in screen space. The clip-space Y flip
+        // used for render targets reverses the window-space winding.
+        glFrontFace(flipY ? GL_CCW : GL_CW);
         glCullFace((m_cullMode == D3DCULL_CW) ? GL_FRONT : GL_BACK);
     }
 
@@ -1201,6 +1418,13 @@ HRESULT IDirect3DDevice9::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType, UINT Sta
         primaryColor[2] = m_material.Diffuse.b;
         primaryColor[3] = m_material.Diffuse.a;
     }
+    if (!(m_fvf & D3DFVF_DIFFUSE)) {
+        GLfloat stageColor[4];
+        if (ComputeUntexturedStage0Color(primaryColor, stageColor)) {
+            for (int i = 0; i < 4; ++i)
+                primaryColor[i] = stageColor[i];
+        }
+    }
     SetupGLState();
     SetupVertexArrays(vbData, stride, m_fvf, primaryColor);
 
@@ -1230,6 +1454,13 @@ HRESULT IDirect3DDevice9::DrawIndexedPrimitive(D3DPRIMITIVETYPE PrimitiveType, I
         primaryColor[2] = m_material.Diffuse.b;
         primaryColor[3] = m_material.Diffuse.a;
     }
+    if (!(m_fvf & D3DFVF_DIFFUSE)) {
+        GLfloat stageColor[4];
+        if (ComputeUntexturedStage0Color(primaryColor, stageColor)) {
+            for (int i = 0; i < 4; ++i)
+                primaryColor[i] = stageColor[i];
+        }
+    }
     SetupGLState();
     SetupVertexArrays(vbData, stride, m_fvf, primaryColor);
 
@@ -1257,6 +1488,13 @@ HRESULT IDirect3DDevice9::DrawPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType, UINT P
         primaryColor[2] = m_material.Diffuse.b;
         primaryColor[3] = m_material.Diffuse.a;
     }
+    if (!(m_fvf & D3DFVF_DIFFUSE)) {
+        GLfloat stageColor[4];
+        if (ComputeUntexturedStage0Color(primaryColor, stageColor)) {
+            for (int i = 0; i < 4; ++i)
+                primaryColor[i] = stageColor[i];
+        }
+    }
     SetupGLState();
     SetupVertexArrays(vbData, stride, m_fvf, primaryColor);
 
@@ -1283,6 +1521,13 @@ HRESULT IDirect3DDevice9::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType,
         primaryColor[1] = m_material.Diffuse.g;
         primaryColor[2] = m_material.Diffuse.b;
         primaryColor[3] = m_material.Diffuse.a;
+    }
+    if (!(m_fvf & D3DFVF_DIFFUSE)) {
+        GLfloat stageColor[4];
+        if (ComputeUntexturedStage0Color(primaryColor, stageColor)) {
+            for (int i = 0; i < 4; ++i)
+                primaryColor[i] = stageColor[i];
+        }
     }
     SetupGLState();
     SetupVertexArrays(vbData, stride, m_fvf, primaryColor);

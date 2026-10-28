@@ -9,6 +9,7 @@
 
 #if defined(__LINUX__)
 typedef unsigned int GLuint;
+typedef float GLfloat;
 
 #if defined(__GNUC__) || defined(__clang__)
 bool Platform_GetImageInfo(const void* data, size_t size, uint32_t* outW, uint32_t* outH, uint32_t* outFormat);
@@ -1628,9 +1629,14 @@ protected:
     ULONG m_refCount;
 };
 
+class IDirect3DTexture9;
+
 class IDirect3DSurface9 : public IDirect3DResource9 {
 public:
-    IDirect3DSurface9(UINT w = 1, UINT h = 1) : m_width(w ? w : 1), m_height(h ? h : 1), m_data(m_width * m_height * 4, 0) {}
+    IDirect3DSurface9(UINT w = 1, UINT h = 1, IDirect3DTexture9* pTexture = nullptr,
+                      bool bDepthStencil = false, bool bDefault = false);
+    ~IDirect3DSurface9() override;
+
     HRESULT LockRect(D3DLOCKED_RECT* pLockedRect, const RECT* /*pRect*/, DWORD /*Flags*/) {
         if (!pLockedRect) return E_INVALIDARG;
         pLockedRect->Pitch = (INT)(m_width * 4);
@@ -1641,7 +1647,7 @@ public:
     HRESULT GetDesc(D3DSURFACE_DESC* pDesc) {
         if (!pDesc) return E_INVALIDARG;
         std::memset(pDesc, 0, sizeof(D3DSURFACE_DESC));
-        pDesc->Format = D3DFMT_A8R8G8B8;
+        pDesc->Format = m_bDepthStencil ? D3DFMT_D16 : D3DFMT_A8R8G8B8;
         pDesc->Type = D3DRTYPE_SURFACE;
         pDesc->Width = m_width;
         pDesc->Height = m_height;
@@ -1649,10 +1655,20 @@ public:
     }
     UINT GetWidth() const { return m_width; }
     UINT GetHeight() const { return m_height; }
+
+    IDirect3DTexture9* GetTexture() const { return m_texture; }
+    bool IsDepthStencil() const { return m_bDepthStencil; }
+    bool IsDefault() const { return m_bDefault; }
+    GLuint GetDepthRenderbuffer();
+
 private:
     UINT m_width;
     UINT m_height;
     std::vector<BYTE> m_data;
+    IDirect3DTexture9* m_texture;
+    bool m_bDepthStencil;
+    bool m_bDefault;
+    GLuint m_depthRenderbuffer;
 };
 typedef IDirect3DSurface9* LPDIRECT3DSURFACE9;
 
@@ -1793,14 +1809,15 @@ typedef ID3DXMesh* LPD3DXMESH;
 
 class IDirect3DDevice9 : public IDirect3DResource9 {
 public:
+    IDirect3DDevice9();
+    ~IDirect3DDevice9() override;
+
     struct StreamSource {
         IDirect3DVertexBuffer9* vb;
         UINT offset;
         UINT stride;
         StreamSource() : vb(nullptr), offset(0), stride(0) {}
     };
-
-    IDirect3DDevice9();
 
     HRESULT TestCooperativeLevel() { return S_OK; }
     UINT    GetAvailableTextureMem() { return 512 * 1024 * 1024; }
@@ -1822,22 +1839,22 @@ public:
     }
     HRESULT GetBackBuffer(UINT /*iSwapChain*/, UINT /*BackBuffer*/, DWORD /*Type*/, IDirect3DSurface9** ppBackBuffer) {
         if (!ppBackBuffer) return E_INVALIDARG;
-        *ppBackBuffer = new IDirect3DSurface9(m_viewport.Width, m_viewport.Height);
+        *ppBackBuffer = new IDirect3DSurface9(m_viewport.Width, m_viewport.Height, nullptr, false, true);
         return S_OK;
     }
     void SetGammaRamp(UINT /*iSwapChain*/, DWORD /*Flags*/, const D3DGAMMARAMP* /*pRamp*/) {}
     HRESULT GetRenderTarget(DWORD, IDirect3DSurface9** ppRenderTarget) {
         if (!ppRenderTarget) return E_INVALIDARG;
-        *ppRenderTarget = new IDirect3DSurface9(m_viewport.Width, m_viewport.Height);
+        *ppRenderTarget = new IDirect3DSurface9(m_viewport.Width, m_viewport.Height, nullptr, false, true);
         return S_OK;
     }
-    HRESULT SetRenderTarget(DWORD, IDirect3DSurface9*) { return S_OK; }
+    HRESULT SetRenderTarget(DWORD RenderTargetIndex, IDirect3DSurface9* pRenderTarget);
     HRESULT GetDepthStencilSurface(IDirect3DSurface9** ppZStencilSurface) {
         if (!ppZStencilSurface) return E_INVALIDARG;
-        *ppZStencilSurface = new IDirect3DSurface9(m_viewport.Width, m_viewport.Height);
+        *ppZStencilSurface = new IDirect3DSurface9(m_viewport.Width, m_viewport.Height, nullptr, true, true);
         return S_OK;
     }
-    HRESULT SetDepthStencilSurface(IDirect3DSurface9*) { return S_OK; }
+    HRESULT SetDepthStencilSurface(IDirect3DSurface9* pZStencilSurface);
     HRESULT BeginScene() { return S_OK; }
     HRESULT EndScene() { return S_OK; }
     HRESULT Clear(DWORD Count, const RECT* pRects, DWORD Flags, D3DCOLOR Color, float Z, DWORD Stencil);
@@ -1897,10 +1914,9 @@ public:
     HRESULT CreateTexture(UINT Width, UINT Height, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL /*Pool*/, IDirect3DTexture9** ppTexture, HANDLE* /*pSharedHandle*/) {
         if (!ppTexture) return E_INVALIDARG;
         *ppTexture = new IDirect3DTexture9(Width, Height, Format, Levels);
-        // Render targets are not rendered into yet (no FBO support). They are
-        // used multiplicatively (character shadow map), so a black placeholder
-        // would blacken the scene: initialise to white (the value the D3D code
-        // clears the shadow map to) so the pass is a no-op.
+        // Render-target textures start white (the value the D3D code clears the
+        // shadow map to) so that sampling them before the first render pass is
+        // a no-op instead of blackening the scene.
         if (Usage & D3DUSAGE_RENDERTARGET)
             (*ppTexture)->Fill(0xFFFFFFFF);
         return S_OK;
@@ -1917,7 +1933,7 @@ public:
     }
     HRESULT CreateDepthStencilSurface(UINT Width, UINT Height, D3DFORMAT, D3DMULTISAMPLE_TYPE, DWORD, BOOL, IDirect3DSurface9** ppSurface, HANDLE*) {
         if (!ppSurface) return E_INVALIDARG;
-        *ppSurface = new IDirect3DSurface9(Width, Height);
+        *ppSurface = new IDirect3DSurface9(Width, Height, nullptr, true, false);
         return S_OK;
     }
     HRESULT SetStreamSource(UINT StreamNumber, IDirect3DVertexBuffer9* pStreamData, UINT OffsetInBytes, UINT Stride) {
@@ -1992,6 +2008,7 @@ private:
     float                  m_fogEnd;
     float                  m_fogDensity;
     bool                   m_rangeFogEnable;
+    bool                   m_inRenderTarget;
     D3DMATERIAL9           m_material;
     DWORD                  m_fvf;
     D3DVIEWPORT9           m_viewport;
@@ -2007,6 +2024,10 @@ private:
     DWORD                  m_cullMode;
     DWORD                  m_fillMode;
     D3DXMATRIX             m_transforms[512];
+    GLuint                 m_fbo;
+
+    void EnsureFramebuffer();
+    bool ComputeUntexturedStage0Color(const GLfloat* current, GLfloat* out) const;
 };
 typedef IDirect3DDevice9* LPDIRECT3DDEVICE9;
 
