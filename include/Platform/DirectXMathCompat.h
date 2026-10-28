@@ -1681,6 +1681,7 @@ public:
     HRESULT LockRect(UINT Level, D3DLOCKED_RECT* pLockedRect, const RECT* pRect, DWORD Flags);
     HRESULT UnlockRect(UINT Level);
     void UploadToGL();
+    void Fill(const DWORD color);
     INT GetPitch(UINT Level = 0) const;
     size_t GetLevelDataSize(UINT Level) const;
     static size_t GetFormatBytesPerPixel(D3DFORMAT fmt);
@@ -1893,9 +1894,15 @@ public:
     HRESULT SetPixelShader(IDirect3DPixelShader9*) { return S_OK; }
     HRESULT GetPixelShader(IDirect3DPixelShader9**) { return S_OK; }
     HRESULT SetPixelShaderConstantF(UINT, const float*, UINT) { return S_OK; }
-    HRESULT CreateTexture(UINT Width, UINT Height, UINT Levels, DWORD /*Usage*/, D3DFORMAT Format, D3DPOOL /*Pool*/, IDirect3DTexture9** ppTexture, HANDLE* /*pSharedHandle*/) {
+    HRESULT CreateTexture(UINT Width, UINT Height, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL /*Pool*/, IDirect3DTexture9** ppTexture, HANDLE* /*pSharedHandle*/) {
         if (!ppTexture) return E_INVALIDARG;
         *ppTexture = new IDirect3DTexture9(Width, Height, Format, Levels);
+        // Render targets are not rendered into yet (no FBO support). They are
+        // used multiplicatively (character shadow map), so a black placeholder
+        // would blacken the scene: initialise to white (the value the D3D code
+        // clears the shadow map to) so the pass is a no-op.
+        if (Usage & D3DUSAGE_RENDERTARGET)
+            (*ppTexture)->Fill(0xFFFFFFFF);
         return S_OK;
     }
     HRESULT CreateVertexBuffer(UINT Length, DWORD /*Usage*/, DWORD /*FVF*/, D3DPOOL /*Pool*/, IDirect3DVertexBuffer9** ppVertexBuffer, HANDLE* /*pSharedHandle*/) {
@@ -1951,6 +1958,7 @@ private:
         DWORD minFilter;
         DWORD magFilter;
         DWORD mipFilter;
+        DWORD borderColor;
     };
 
     struct TextureStageState {

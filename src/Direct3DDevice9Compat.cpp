@@ -31,6 +31,12 @@ void* g_pfnForceLinkImageLoader[] = {
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE 0x812F
 #endif
+#ifndef GL_CLAMP_TO_BORDER
+#define GL_CLAMP_TO_BORDER 0x812D
+#endif
+#ifndef GL_TEXTURE_BORDER_COLOR
+#define GL_TEXTURE_BORDER_COLOR 0x1004
+#endif
 #ifndef GL_TEXTURE0
 #define GL_TEXTURE0 0x84C0
 #endif
@@ -173,9 +179,56 @@ void IDirect3DTexture9::UploadLevelToGL(UINT level, const BYTE* pBytes, size_t d
             rgba[i] = (a << 24) | (b << 16) | (g << 8) | r;
         }
         glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA, mipW, mipH, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    } else if (m_format == D3DFMT_R5G6B5) {
+        // 16 bit 5-6-5: must be expanded explicitly. Passing the 2-byte source
+        // to a GL_BGRA 32-bit upload reads out of bounds and produces garbage
+        // (this is the character shadow map format).
+        std::vector<uint32_t> rgba(mipW * mipH);
+        const uint16_t* src = (const uint16_t*)pBytes;
+        for (size_t i = 0; i < rgba.size(); ++i) {
+            uint16_t val = src[i];
+            uint8_t r = (val >> 11) & 0x1F; r = (r << 3) | (r >> 2);
+            uint8_t g = (val >> 5) & 0x3F;  g = (g << 2) | (g >> 4);
+            uint8_t b = val & 0x1F;         b = (b << 3) | (b >> 2);
+            rgba[i] = (0xFFu << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | r;
+        }
+        glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA, mipW, mipH, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    } else if (m_format == D3DFMT_A1R5G5B5) {
+        std::vector<uint32_t> rgba(mipW * mipH);
+        const uint16_t* src = (const uint16_t*)pBytes;
+        for (size_t i = 0; i < rgba.size(); ++i) {
+            uint16_t val = src[i];
+            uint8_t a = (val & 0x8000) ? 0xFF : 0x00;
+            uint8_t r = (val >> 10) & 0x1F; r = (r << 3) | (r >> 2);
+            uint8_t g = (val >> 5) & 0x1F;  g = (g << 3) | (g >> 2);
+            uint8_t b = val & 0x1F;         b = (b << 3) | (b >> 2);
+            rgba[i] = ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | r;
+        }
+        glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA, mipW, mipH, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
     } else {
         glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA, mipW, mipH, 0, GL_BGRA, GL_UNSIGNED_BYTE, pBytes);
     }
+}
+
+void IDirect3DTexture9::Fill(const DWORD color)
+{
+    if (m_format == D3DFMT_DXT1 || m_format == D3DFMT_DXT3 || m_format == D3DFMT_DXT5)
+        return;
+    if (GetFormatBytesPerPixel(m_format) == 2) {
+        WORD v = (WORD)(color & 0xFFFF);
+        for (size_t i = 0; i + 1 < m_data.size(); i += 2) {
+            m_data[i] = (BYTE)(v & 0xFF);
+            m_data[i + 1] = (BYTE)(v >> 8);
+        }
+    } else {
+        for (size_t i = 0; i + 3 < m_data.size(); i += 4) {
+            m_data[i] = (BYTE)(color & 0xFF);
+            m_data[i + 1] = (BYTE)((color >> 8) & 0xFF);
+            m_data[i + 2] = (BYTE)((color >> 16) & 0xFF);
+            m_data[i + 3] = (BYTE)((color >> 24) & 0xFF);
+        }
+    }
+    m_dirty = true;
 }
 
 void IDirect3DTexture9::UploadToGL()
@@ -258,6 +311,7 @@ IDirect3DDevice9::IDirect3DDevice9()
         m_samplerStates[i].minFilter = D3DTEXF_LINEAR;
         m_samplerStates[i].magFilter = D3DTEXF_LINEAR;
         m_samplerStates[i].mipFilter = D3DTEXF_LINEAR;
+        m_samplerStates[i].borderColor = 0;
         m_texStageStates[i].colorOp = (i == 0) ? D3DTOP_MODULATE : D3DTOP_DISABLE;
         m_texStageStates[i].colorArg0 = D3DTA_CURRENT;
         m_texStageStates[i].colorArg1 = D3DTA_TEXTURE;
@@ -470,6 +524,8 @@ HRESULT IDirect3DDevice9::SetSamplerState(DWORD Stage, D3DSAMPLERSTATETYPE Type,
             m_samplerStates[Stage].minFilter = Value;
         } else if (Type == D3DSAMP_MIPFILTER) {
             m_samplerStates[Stage].mipFilter = Value;
+        } else if (Type == D3DSAMP_BORDERCOLOR) {
+            m_samplerStates[Stage].borderColor = Value;
         }
     }
     return S_OK;
@@ -493,6 +549,9 @@ HRESULT IDirect3DDevice9::GetSamplerState(DWORD Stage, D3DSAMPLERSTATETYPE Type,
             return S_OK;
         } else if (Type == D3DSAMP_MIPFILTER) {
             *pValue = m_samplerStates[Stage].mipFilter;
+            return S_OK;
+        } else if (Type == D3DSAMP_BORDERCOLOR) {
+            *pValue = m_samplerStates[Stage].borderColor;
             return S_OK;
         }
     }
@@ -904,13 +963,28 @@ void IDirect3DDevice9::SetupGLState()
         bool hasMips = m_boundTextures[stage]->HasMipMaps();
         if (m_samplerStates[stage].addressU == D3DTADDRESS_CLAMP) {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        } else if (m_samplerStates[stage].addressU == D3DTADDRESS_BORDER) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
         } else {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         }
         if (m_samplerStates[stage].addressV == D3DTADDRESS_CLAMP) {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        } else if (m_samplerStates[stage].addressV == D3DTADDRESS_BORDER) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
         } else {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        }
+        if (m_samplerStates[stage].addressU == D3DTADDRESS_BORDER ||
+            m_samplerStates[stage].addressV == D3DTADDRESS_BORDER) {
+            const DWORD c = m_samplerStates[stage].borderColor;
+            const GLfloat border[4] = {
+                ((c >> 16) & 0xFF) / 255.0f,
+                ((c >> 8) & 0xFF) / 255.0f,
+                (c & 0xFF) / 255.0f,
+                ((c >> 24) & 0xFF) / 255.0f
+            };
+            glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
         }
 
         GLint mag = (m_samplerStates[stage].magFilter == D3DTEXF_POINT) ? GL_NEAREST : GL_LINEAR;
