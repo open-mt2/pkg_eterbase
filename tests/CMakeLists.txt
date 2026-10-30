@@ -8,6 +8,8 @@ set(TEST_TARGETS
     test_stl
     test_timer
     test_poly
+    test_crc32_vectors
+    test_lzo_invariants
 )
 
 foreach(TEST_NAME ${TEST_TARGETS})

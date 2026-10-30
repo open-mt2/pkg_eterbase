@@ -85,39 +85,20 @@ DWORD GetCRC32(const char * buf, size_t len)
     return crc;
 }
 
+static inline unsigned char crc_case_byte(unsigned char c)
+{
+    // ASCII-only case folding: locale independent and reversible for the
+    // asset paths this hash is used on.
+    return (c >= 'A' && c <= 'Z') ? static_cast<unsigned char>(c + ('a' - 'A')) : c;
+}
+
 DWORD GetCaseCRC32(const char * buf, size_t len)
 {
     DWORD crc = 0xffffffff;
 
-    for (; len >= 16; len -= 16)
+    for (size_t i = 0; i < len; ++i)
     {
-		DO1(buf, 0);
-		DO1(buf, 1);
-		DO1(buf, 2);
-		DO1(buf, 3);
-		DO1(buf, 4);
-		DO1(buf, 5);
-		DO1(buf, 6);
-		DO1(buf, 7);
-		DO1(buf, 8);
-		DO1(buf, 9);
-		DO1(buf, 10);
-		DO1(buf, 11);
-		DO1(buf, 12);
-		DO1(buf, 13);
-		DO1(buf, 14);
-		DO1(buf, 15);
-		buf += 16;
-    }
-
-    if (len) 
-	{
-		do 
-		{
-			DO1(buf, 0);
-			buf++;
-		} 
-		while (--len);
+        crc = CRCTable[(crc ^ crc_case_byte(static_cast<unsigned char>(buf[i]))) & 0xff] ^ (crc >> 8);
     }
 
     crc ^= 0xffffffff;
