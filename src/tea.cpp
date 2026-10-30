@@ -39,21 +39,26 @@ void tea_decode(const uint32_t sz, const uint32_t sy, const uint32_t *key, uint3
 
 int tea_encrypt(uint32_t *dest, const uint32_t *src, const uint32_t * key, int size)
 {
-	int		i;
-	int		resize;
-	
-	if (size % 8 != 0)
+	int resize = (size % 8 != 0) ? size + 8 - (size % 8) : size;
+
+	for (int i = 0; i < (resize >> 3); i++, dest += 2, src += 2)
 	{
-		resize = size + 8 - (size % 8);
-		memset((char *) src + size, 0, resize - size);
+		if ((i + 1) * 8 <= size)
+		{
+			tea_code(*(src + 1), *src, key, dest);
+		}
+		else
+		{
+			// Zero-pad the tail into a local block: writing the padding back
+			// into `src` overflowed the caller's buffer by up to 7 bytes.
+			uint32_t block[2] = { 0, 0 };
+			const int remaining = size - i * 8;
+			memcpy(block, src, remaining);
+			tea_code(block[1], block[0], key, dest);
+		}
 	}
-	else
-		resize = size;
-	
-	for (i = 0; i < resize >> 3; i++, dest += 2, src += 2)
-		tea_code(*(src + 1), *src, key, dest);
-	
-	return (resize);
+
+	return resize;
 }
 
 int tea_decrypt(uint32_t *dest, const uint32_t *src, const uint32_t * key, int size)
