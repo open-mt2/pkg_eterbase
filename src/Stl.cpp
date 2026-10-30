@@ -5,12 +5,13 @@ static std::list<std::string> s_stList;
 
 char korean_tolower(const char c)
 {
-	char ret = c;
+	// Only ASCII 'A'..'Z' are folded. CP949 lead/trail bytes must pass through
+	// unchanged, and tolower() is undefined for negative char values, so it
+	// cannot be used outside the ASCII range.
 	if (c >= 'A' && c <= 'Z')
-		ret = c - 'A' + 'a';
+		return static_cast<char>(c - 'A' + 'a');
 
-	assert(ret == tolower(c));
-	return ret;
+	return c;
 }
 
 std::string& stl_static_string(const char * c_sz)
