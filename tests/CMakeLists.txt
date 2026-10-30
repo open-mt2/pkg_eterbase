@@ -13,5 +13,8 @@ set(TEST_TARGETS
 foreach(TEST_NAME ${TEST_TARGETS})
     add_executable(${TEST_NAME} ${TEST_NAME}.cpp)
     target_link_libraries(${TEST_NAME} PRIVATE EterBase)
+    target_include_directories(${TEST_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    # Asserts must stay active in every build type (D15).
+    target_compile_options(${TEST_NAME} PRIVATE $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
 endforeach()
