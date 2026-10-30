@@ -22,10 +22,11 @@ int main()
     TEST_ASSERT(crc1 != crc3);
     TEST_PASS("consistency: crc1 == crc2, crc1 != crc3");
 
-    // Case CRC check
+    // Case CRC check: the case-insensitive hash folds ASCII case.
     DWORD case1 = GetCaseCRC32(str1, strlen(str1));
-    TEST_ASSERT(case1 == crc1);
-    TEST_PASS("GetCaseCRC32 matches GetCRC32");
+    TEST_ASSERT(case1 == GetCRC32("teststringforcrc32", 18));
+    TEST_ASSERT(case1 != crc1);
+    TEST_PASS("GetCaseCRC32 folds ASCII case");
 
     // Differentiation between cases
     const char* upper = "METIN2";
