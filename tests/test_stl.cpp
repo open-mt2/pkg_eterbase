@@ -51,6 +51,21 @@ int main()
         printf("  [PASS] korean_tolower correctly maps uppercase letters.\n");
     }
 
+    // 5. korean_tolower passes non-ASCII bytes through unchanged.
+    // CP949 lead/trail bytes must survive lowercasing, and libc tolower() is
+    // undefined for negative char values, so the function must not delegate
+    // to it outside 'A'..'Z'.
+    {
+        for (int value = 0x80; value <= 0xFF; ++value)
+        {
+            char c = static_cast<char>(value);
+            assert(korean_tolower(c) == c);
+        }
+        assert(korean_tolower(static_cast<char>(0xC3)) == static_cast<char>(0xC3));
+        assert(korean_tolower(static_cast<char>(0xE3)) == static_cast<char>(0xE3));
+        printf("  [PASS] korean_tolower leaves non-ASCII bytes unchanged.\n");
+    }
+
     printf("[TEST] Stl utility tests PASSED successfully.\n");
     return 0;
 }
