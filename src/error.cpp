@@ -23,6 +23,21 @@ BOOL CALLBACK EnumerateLoadedModulesProc(PCSTR ModuleName, ULONG ModuleBase, ULO
 		return TRUE;
 }
 
+#if defined(_WIN64)
+// 64-bit builds get the DWORD64 variant of the module walk (D10).
+BOOL CALLBACK EnumerateLoadedModulesProc64(PCSTR ModuleName, DWORD64 ModuleBase, DWORD64 ModuleSize, PVOID UserContext)
+{
+	DWORD64 offset = *((DWORD64*)UserContext);
+
+	if (offset >= ModuleBase && offset <= ModuleBase + ModuleSize)
+	{
+		fprintf(fException, "%s", ModuleName);
+		return FALSE;
+	}
+	return TRUE;
+}
+#endif
+
 LONG __stdcall EterExceptionFilter(_EXCEPTION_POINTERS* pExceptionInfo)
 {
 	HANDLE		hProcess	= GetCurrentProcess();
@@ -47,6 +62,36 @@ LONG __stdcall EterExceptionFilter(_EXCEPTION_POINTERS* pExceptionInfo)
 		
 		CONTEXT&	context		= *pExceptionInfo->ContextRecord;
 		
+#if defined(_WIN64)
+		fprintf(fException, "rax: 0x%016llx\trbx: 0x%016llx\n", (unsigned long long)context.Rax, (unsigned long long)context.Rbx);
+		fprintf(fException, "rcx: 0x%016llx\trdx: 0x%016llx\n", (unsigned long long)context.Rcx, (unsigned long long)context.Rdx);
+		fprintf(fException, "rsi: 0x%016llx\trdi: 0x%016llx\n", (unsigned long long)context.Rsi, (unsigned long long)context.Rdi);
+		fprintf(fException, "rbp: 0x%016llx\trsp: 0x%016llx\n", (unsigned long long)context.Rbp, (unsigned long long)context.Rsp);
+		fprintf(fException, "\n");
+
+		STACKFRAME64 stackFrame = {0,};
+		stackFrame.AddrPC.Offset	= context.Rip;
+		stackFrame.AddrPC.Mode		= AddrModeFlat;
+		stackFrame.AddrStack.Offset	= context.Rsp;
+		stackFrame.AddrStack.Mode	= AddrModeFlat;
+		stackFrame.AddrFrame.Offset	= context.Rbp;
+		stackFrame.AddrFrame.Mode	= AddrModeFlat;
+
+		for (int i=0; i < 512 && stackFrame.AddrPC.Offset; ++i)
+		{
+			if (StackWalk64(IMAGE_FILE_MACHINE_AMD64, hProcess, hThread, &stackFrame, &context,
+			                NULL, SymFunctionTableAccess64, SymGetModuleBase64, NULL) != FALSE)
+			{
+				fprintf(fException, "0x%016llx\t", (unsigned long long)stackFrame.AddrPC.Offset);
+				EnumerateLoadedModules64(hProcess, (PENUMLOADED_MODULES_CALLBACK64) EnumerateLoadedModulesProc64, &stackFrame.AddrPC.Offset);
+				fprintf(fException, "\n");
+			}
+			else
+			{
+				break;
+			}
+		}
+#else
 		fprintf(fException, "eax: 0x%08x\tebx: 0x%08x\n", context.Eax, context.Ebx);
 		fprintf(fException, "ecx: 0x%08x\tedx: 0x%08x\n", context.Ecx, context.Edx);
 		fprintf(fException, "esi: 0x%08x\tedi: 0x%08x\n", context.Esi, context.Edi);
@@ -73,7 +118,8 @@ LONG __stdcall EterExceptionFilter(_EXCEPTION_POINTERS* pExceptionInfo)
 			{
 				break;
 			}
-		} 
+		}
+#endif 
 		
 		fprintf(fException, "\n");
 

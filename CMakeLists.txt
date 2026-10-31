@@ -29,7 +29,13 @@ endif()
 # Dependencies
 find_package(PkgConfig QUIET)
 find_library(LZO_LIBRARY NAMES lzo2 lzo REQUIRED)
-find_package(OpenGL REQUIRED)
+# lzo.h is a public EterBase header, so its include directory has to be public
+# too; on Windows cross builds it comes from the deps prefix (T2.3), not the host.
+find_path(LZO_INCLUDE_DIR NAMES lzo/lzo1x.h)
+if(NOT WIN32)
+    # Windows cross builds link opengl32 from the MinGW sysroot instead (T1.5).
+    find_package(OpenGL REQUIRED)
+endif()
 
 # Source files
 set(ETERBASE_SOURCES
@@ -104,7 +110,18 @@ add_library(EterBase::EterBase ALIAS EterBase)
 # EterGrnLib, SpeedTreeLib, PRTerrainLib, EterPythonLib) include the Platform
 # headers and only see definitions carried by the target they link (issue #79).
 if(WIN32)
-    target_compile_definitions(EterBase PUBLIC WIN32 _WINDOWS _CRT_SECURE_NO_WARNINGS)
+    # T1.5: the Windows build uses the same GL compatibility renderer as Linux.
+    # USE_PLATFORM_D3D_COMPAT keeps DirectXMathCompat.h as the single D3D9
+    # vocabulary instead of pulling d3d9/d3dx9/dinput from the SDK.
+    target_compile_definitions(EterBase PUBLIC
+        WIN32
+        _WINDOWS
+        _CRT_SECURE_NO_WARNINGS
+        OPENMT2_PLATFORM_WINDOWS=1
+        OPENMT2_RENDERER_GL=1
+        OPENMT2_SDL_WINDOW=1
+        USE_PLATFORM_D3D_COMPAT=1
+    )
 else()
     target_compile_definitions(EterBase PUBLIC
         OPENMT2_PLATFORM_LINUX=1
@@ -116,6 +133,7 @@ endif()
 
 target_include_directories(EterBase
     PUBLIC
+        ${LZO_INCLUDE_DIR}
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/EterBase>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/EterBase/Poly>
@@ -129,6 +147,12 @@ target_link_libraries(EterBase
     PUBLIC
         ${LZO_LIBRARY}
         $<$<PLATFORM_ID:Linux>:OpenGL::GL>
+        # Windows has only GL 1.1 in opengl32.dll; the entry points above it are
+        # loaded at runtime (Platform_LoadGLFunctions, T1.4).
+        $<$<PLATFORM_ID:Windows>:opengl32>
+        # Timer.cpp uses timeGetTime (T1.5: the first Windows link blocker
+        # after the POSIX libraries were made platform-aware in T2.5).
+        $<$<PLATFORM_ID:Windows>:winmm>
 )
 
 # Unit Tests

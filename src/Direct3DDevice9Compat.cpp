@@ -15,7 +15,9 @@ void* g_pfnForceLinkImageLoader[] = {
     (void*)&Platform_DecodeImage
 };
 
-#if defined(OPENMT2_PLATFORM_LINUX)
+// The renderer, not the platform, selects this translation unit (R8): the GL
+// compatibility facade is the Windows path too (T1.5).
+#if defined(OPENMT2_RENDERER_GL)
 #include <Platform/RenderBackend.h>
 #include <algorithm>
 #include <cstring>
@@ -940,4 +942,4 @@ HRESULT IDirect3DDevice9::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType,
     return S_OK;
 }
 
-#endif // OPENMT2_PLATFORM_LINUX
+#endif // OPENMT2_RENDERER_GL

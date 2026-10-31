@@ -18,14 +18,23 @@ bool Platform_DecodeImage(const void* data, size_t size, uint32_t* outW, uint32_
 #endif
 
 #if defined(_WIN32) && !defined(USE_PLATFORM_D3D_COMPAT)
+    // Legacy Windows branch (D1/D2 retired the native path). The DirectX SDK
+    // headers are gone: the compat vocabulary below is the only contract, so a
+    // Windows build defines USE_PLATFORM_D3D_COMPAT and takes the else branch.
     #include <d3d9.h>
-    #include <directxsdk/d3dx9.h>
-    #include <dinput.h>
 #else
 
 // Renderer seam contract (T1.7): resources are named by opaque handles so no
 // GL type leaks above the backend (invariant R2).
 #include "RenderBackend.h"
+
+// d3d9.h defines this; <windows.h> alone does not. The compat vocabulary needs
+// it for the DXT formats (T1.5 drops the DirectX SDK headers).
+#ifndef MAKEFOURCC
+#define MAKEFOURCC(ch0, ch1, ch2, ch3) \
+    ((DWORD)(BYTE)(ch0) | ((DWORD)(BYTE)(ch1) << 8) | \
+     ((DWORD)(BYTE)(ch2) << 16) | ((DWORD)(BYTE)(ch3) << 24))
+#endif
 
 // =============================================================
 // 1. D3D9 Basic Types, Constants & Enums

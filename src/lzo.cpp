@@ -281,15 +281,21 @@ bool CLZObject::Encrypt(DWORD *pdwKey) {
 
   BYTE *pbBuffer = m_pbBuffer + sizeof(THeader);
   m_pHeader->dwEncryptSize =
-      tea_encrypt((DWORD *)pbBuffer, (const DWORD *)pbBuffer, pdwKey,
-                  m_pHeader->dwCompressedSize + 19);
+      // TEA works on 32-bit words. DWORD is unsigned long on Windows x64 (LLP64),
+    // a distinct type from uint32_t although the same width (T0.3 width audit).
+    tea_encrypt(reinterpret_cast<uint32_t*>(pbBuffer),
+                reinterpret_cast<const uint32_t*>(pbBuffer),
+                reinterpret_cast<const uint32_t*>(pdwKey),
+                m_pHeader->dwCompressedSize + 19);
   return true;
 }
 
 bool CLZObject::__Decrypt(DWORD *key, BYTE *data) {
   assert(m_pbBuffer);
 
-  tea_decrypt((DWORD *)data, (const DWORD *)(m_pbIn - sizeof(DWORD)), key,
+  tea_decrypt(reinterpret_cast<uint32_t*>(data),
+              reinterpret_cast<const uint32_t*>(m_pbIn - sizeof(DWORD)),
+              reinterpret_cast<const uint32_t*>(key),
               m_pHeader->dwEncryptSize);
   return true;
 }
