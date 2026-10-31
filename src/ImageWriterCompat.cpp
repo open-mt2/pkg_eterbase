@@ -26,3 +26,10 @@ bool Platform_SaveImageTGA(const char* path, int width, int height, const void* 
 
     return stbi_write_tga(path, width, height, 4, rgba.data()) != 0;
 }
+
+bool Platform_SaveImageJPEG(const char* path, int width, int height, const void* rgbPixels, int quality) {
+    if (!path || width <= 0 || height <= 0 || !rgbPixels) return false;
+    if (quality < 1) quality = 1;
+    if (quality > 100) quality = 100;
+    return stbi_write_jpg(path, width, height, 3, rgbPixels, quality) != 0;
+}
