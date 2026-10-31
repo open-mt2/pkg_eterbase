@@ -121,6 +121,10 @@ if(WIN32)
         OPENMT2_RENDERER_GL=1
         OPENMT2_SDL_WINDOW=1
         USE_PLATFORM_D3D_COMPAT=1
+        # D10 selects 64-bit; MSVC sets this itself. Python 2.7's pyconfig.h
+        # picks its ABI sizes from it, and lzo's headers read those sizes
+        # (without it lzo claims ILP32 and its compile-time asserts fail).
+        MS_WIN64
     )
 else()
     target_compile_definitions(EterBase PUBLIC
