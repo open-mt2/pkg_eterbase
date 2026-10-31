@@ -5,6 +5,26 @@
         #define WIN32_LEAN_AND_MEAN
     #endif
     #include <windows.h>
+
+    #ifdef __cplusplus
+        // T1.9: MinGW's windows.h does not define the min/max macros MSVC
+        // provided, so publish the same helpers the non-Windows branch uses
+        // (including mixed-type calls such as min(int, size_t)).
+        #include <algorithm>
+        #include <type_traits>
+        using std::min;
+        using std::max;
+        template <typename T, typename U, typename std::enable_if<!std::is_same<T, U>::value && (std::is_arithmetic<T>::value || std::is_enum<T>::value) && (std::is_arithmetic<U>::value || std::is_enum<U>::value), int>::type = 0>
+        inline typename std::common_type<T, U>::type min(T a, U b) {
+            using R = typename std::common_type<T, U>::type;
+            return (static_cast<R>(a) < static_cast<R>(b)) ? static_cast<R>(a) : static_cast<R>(b);
+        }
+        template <typename T, typename U, typename std::enable_if<!std::is_same<T, U>::value && (std::is_arithmetic<T>::value || std::is_enum<T>::value) && (std::is_arithmetic<U>::value || std::is_enum<U>::value), int>::type = 0>
+        inline typename std::common_type<T, U>::type max(T a, U b) {
+            using R = typename std::common_type<T, U>::type;
+            return (static_cast<R>(a) > static_cast<R>(b)) ? static_cast<R>(a) : static_cast<R>(b);
+        }
+    #endif
 #else
     // ========================================================
     // Linux / Non-Windows Compatibility Definitions
