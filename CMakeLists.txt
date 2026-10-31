@@ -121,6 +121,8 @@ if(WIN32)
         OPENMT2_RENDERER_GL=1
         OPENMT2_SDL_WINDOW=1
         USE_PLATFORM_D3D_COMPAT=1
+        MS_WIN64
+        STRSAFE_NO_DEPRECATE
     )
 else()
     target_compile_definitions(EterBase PUBLIC
