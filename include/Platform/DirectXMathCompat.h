@@ -8,9 +8,6 @@
 #include <algorithm>
 
 #if defined(OPENMT2_PLATFORM_LINUX)
-typedef unsigned int GLuint;
-typedef float GLfloat;
-
 #if defined(__GNUC__) || defined(__clang__)
 bool Platform_GetImageInfo(const void* data, size_t size, uint32_t* outW, uint32_t* outH, uint32_t* outFormat);
 bool Platform_DecodeImage(const void* data, size_t size, uint32_t* outW, uint32_t* outH, std::vector<uint8_t>& outPixels);
@@ -25,6 +22,10 @@ bool Platform_DecodeImage(const void* data, size_t size, uint32_t* outW, uint32_
     #include <directxsdk/d3dx9.h>
     #include <dinput.h>
 #else
+
+// Renderer seam contract (T1.7): resources are named by opaque handles so no
+// GL type leaks above the backend (invariant R2).
+#include "RenderBackend.h"
 
 // =============================================================
 // 1. D3D9 Basic Types, Constants & Enums
@@ -1659,7 +1660,7 @@ public:
     IDirect3DTexture9* GetTexture() const { return m_texture; }
     bool IsDepthStencil() const { return m_bDepthStencil; }
     bool IsDefault() const { return m_bDefault; }
-    GLuint GetDepthRenderbuffer();
+    RenderHandle GetDepthStencil();
 
 private:
     UINT m_width;
@@ -1668,7 +1669,7 @@ private:
     IDirect3DTexture9* m_texture;
     bool m_bDepthStencil;
     bool m_bDefault;
-    GLuint m_depthRenderbuffer;
+    RenderHandle m_depthStencil;
 };
 typedef IDirect3DSurface9* LPDIRECT3DSURFACE9;
 
@@ -1693,10 +1694,10 @@ public:
     bool HasMipMaps() const { return !m_mipLevels.empty(); }
     DWORD GetLevelCount() override { return 1 + (DWORD)m_mipLevels.size(); }
 
-    GLuint GetGLTexture();
+    RenderHandle GetTextureHandle();
     HRESULT LockRect(UINT Level, D3DLOCKED_RECT* pLockedRect, const RECT* pRect, DWORD Flags);
     HRESULT UnlockRect(UINT Level);
-    void UploadToGL();
+    void UploadToBackend();
     void Fill(const DWORD color);
     INT GetPitch(UINT Level = 0) const;
     size_t GetLevelDataSize(UINT Level) const;
@@ -1704,12 +1705,12 @@ public:
     HRESULT GetSurfaceLevel(UINT Level, IDirect3DSurface9** ppSurfaceLevel);
 
 private:
-    void UploadLevelToGL(UINT level, const BYTE* pBytes, size_t dataSize);
+    void UploadLevelToBackend(UINT level, const BYTE* pBytes, size_t dataSize);
 
     UINT m_width;
     UINT m_height;
     D3DFORMAT m_format;
-    GLuint m_glTextureId;
+    RenderHandle m_handle;
     bool m_dirty;
     std::vector<BYTE> m_data;
     std::map<UINT, std::vector<BYTE>> m_mipLevels;
@@ -1855,8 +1856,8 @@ public:
         return S_OK;
     }
     HRESULT SetDepthStencilSurface(IDirect3DSurface9* pZStencilSurface);
-    HRESULT BeginScene() { return S_OK; }
-    HRESULT EndScene() { return S_OK; }
+    HRESULT BeginScene();
+    HRESULT EndScene();
     HRESULT Clear(DWORD Count, const RECT* pRects, DWORD Flags, D3DCOLOR Color, float Z, DWORD Stencil);
     HRESULT SetTransform(D3DTRANSFORMSTATETYPE State, const D3DMATRIX* pMatrix) {
         if (pMatrix && (unsigned)State < 512) m_transforms[State] = *pMatrix;
@@ -1966,7 +1967,7 @@ public:
     DWORD GetFillMode() const { return m_fillMode; }
 
 private:
-    void SetupGLState();
+    void FillRenderState(RenderState& state) const;
 
     struct SamplerStageState {
         DWORD addressU;
@@ -2024,10 +2025,8 @@ private:
     DWORD                  m_cullMode;
     DWORD                  m_fillMode;
     D3DXMATRIX             m_transforms[512];
-    GLuint                 m_fbo;
 
-    void EnsureFramebuffer();
-    bool ComputeUntexturedStage0Color(const GLfloat* current, GLfloat* out) const;
+    bool ComputeUntexturedStage0Color(const float* current, float* out) const;
 };
 typedef IDirect3DDevice9* LPDIRECT3DDEVICE9;
 
