@@ -86,7 +86,7 @@ void Logf(UINT uLevel, const char* c_szFormat, ...)
 	va_start(args, c_szFormat);
 	_vsnprintf(szBuf, sizeof(szBuf), c_szFormat, args);
 	va_end(args);
-#if defined(_DEBUG) || defined(__LINUX__)
+#if defined(_DEBUG) || defined(OPENMT2_PLATFORM_LINUX)
 	OutputDebugString(szBuf);	
 	fputs(szBuf, stdout);
 	fflush(stdout);
@@ -113,7 +113,7 @@ void Lognf(UINT uLevel, const char* c_szFormat, ...)
 		szBuf[len + 1] = '\0';
 	}
 	va_end(args);
-#if defined(_DEBUG) || defined(__LINUX__)
+#if defined(_DEBUG) || defined(OPENMT2_PLATFORM_LINUX)
 	OutputDebugString(szBuf);	
 	puts(szBuf);
 	fflush(stdout);
@@ -126,7 +126,7 @@ void Lognf(UINT uLevel, const char* c_szFormat, ...)
 
 void Trace(const char * c_szMsg)
 {
-#if defined(_DEBUG) || defined(__LINUX__)
+#if defined(_DEBUG) || defined(OPENMT2_PLATFORM_LINUX)
 	OutputDebugString(c_szMsg);
 	printf("%s", c_szMsg);
 	fflush(stdout);
@@ -138,7 +138,7 @@ void Trace(const char * c_szMsg)
 
 void Tracen(const char* c_szMsg)
 {
-#if defined(_DEBUG) || defined(__LINUX__)
+#if defined(_DEBUG) || defined(OPENMT2_PLATFORM_LINUX)
 	char szBuf[DEBUG_STRING_MAX_LEN+1];
 	_snprintf(szBuf, sizeof(szBuf), "%s\n", c_szMsg);
 	OutputDebugString(szBuf);
@@ -170,7 +170,7 @@ void Tracenf(const char* c_szFormat, ...)
 		szBuf[len + 1] = '\0';
 	}
 	va_end(args);
-#if defined(_DEBUG) || defined(__LINUX__)
+#if defined(_DEBUG) || defined(OPENMT2_PLATFORM_LINUX)
 	OutputDebugString(szBuf);	
 	printf("%s", szBuf);
 	fflush(stdout);
@@ -189,7 +189,7 @@ void Tracef(const char* c_szFormat, ...)
 	_vsnprintf(szBuf, sizeof(szBuf), c_szFormat, args);
 	va_end(args);
 
-#if defined(_DEBUG) || defined(__LINUX__)
+#if defined(_DEBUG) || defined(OPENMT2_PLATFORM_LINUX)
 	OutputDebugString(szBuf);	
 	fputs(szBuf, stdout);
 	fflush(stdout);
@@ -226,7 +226,7 @@ void TraceError(const char* c_szFormat, ...)
 					szBuf + 8);
 	fflush(stderr);
 	
-#if defined(_DEBUG) || defined(__LINUX__)
+#if defined(_DEBUG) || defined(OPENMT2_PLATFORM_LINUX)
 	OutputDebugString(szBuf);
 	fputs(szBuf, stdout);
 	fflush(stdout);
@@ -257,7 +257,7 @@ void TraceErrorWithoutEnter(const char* c_szFormat, ...)
 					szBuf + 8);
 	fflush(stderr);
 
-#if defined(_DEBUG) || defined(__LINUX__)
+#if defined(_DEBUG) || defined(OPENMT2_PLATFORM_LINUX)
 	OutputDebugString(szBuf);
 	fputs(szBuf, stdout);
 	fflush(stdout);
@@ -308,7 +308,7 @@ void LogFilef(const char * c_szMessage, ...)
 
 void OpenLogFile(bool bUseLogFIle)
 {
-#if !defined(_DISTRIBUTE) || defined(__LINUX__)
+#if !defined(_DISTRIBUTE) || defined(OPENMT2_PLATFORM_LINUX)
 	freopen("syserr.txt", "w", stderr);
 #endif
 

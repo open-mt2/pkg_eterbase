@@ -7,7 +7,7 @@
 #include <cstring>
 #include <algorithm>
 
-#if defined(__LINUX__)
+#if defined(OPENMT2_PLATFORM_LINUX)
 typedef unsigned int GLuint;
 typedef float GLfloat;
 
@@ -2106,7 +2106,7 @@ inline HRESULT D3DXGetImageInfoFromFileInMemory(LPCVOID pSrcData, UINT SrcDataSi
     pSrcInfo->Format = D3DFMT_A8R8G8B8;
     pSrcInfo->ResourceType = D3DRTYPE_TEXTURE;
 
-#if defined(__LINUX__)
+#if defined(OPENMT2_PLATFORM_LINUX)
     if (Platform_GetImageInfo) {
         uint32_t w = 0, h = 0, fmt = 21;
         if (Platform_GetImageInfo(pSrcData, SrcDataSize, &w, &h, &fmt)) {
@@ -2128,7 +2128,7 @@ inline HRESULT D3DXCreateTextureFromFileInMemoryEx(
 {
     if (!pSrcData || SrcDataSize == 0 || !ppTexture) return E_FAIL;
 
-#if defined(__LINUX__)
+#if defined(OPENMT2_PLATFORM_LINUX)
     if (Platform_DecodeImage) {
         uint32_t w = 0, h = 0;
         std::vector<uint8_t> pixels;

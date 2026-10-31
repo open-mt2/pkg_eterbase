@@ -8,7 +8,7 @@ void* g_pfnForceLinkImageLoader[] = {
     (void*)&Platform_DecodeImage
 };
 
-#if defined(__LINUX__)
+#if defined(OPENMT2_PLATFORM_LINUX)
 #ifndef GL_GLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES 1
 #endif
@@ -1542,4 +1542,4 @@ HRESULT IDirect3DDevice9::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE PrimitiveType,
     return S_OK;
 }
 
-#endif // __LINUX__
+#endif // OPENMT2_PLATFORM_LINUX

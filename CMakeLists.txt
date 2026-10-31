@@ -98,7 +98,12 @@ add_library(EterBase::EterBase ALIAS EterBase)
 if(WIN32)
     target_compile_definitions(EterBase PUBLIC WIN32 _WINDOWS _CRT_SECURE_NO_WARNINGS)
 else()
-    target_compile_definitions(EterBase PUBLIC __LINUX__ _GNU_SOURCE)
+    target_compile_definitions(EterBase PUBLIC
+        OPENMT2_PLATFORM_LINUX=1
+        OPENMT2_RENDERER_GL=1
+        OPENMT2_SDL_WINDOW=1
+        _GNU_SOURCE
+    )
 endif()
 
 target_include_directories(EterBase
