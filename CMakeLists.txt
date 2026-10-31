@@ -153,6 +153,10 @@ target_link_libraries(EterBase
         # Timer.cpp uses timeGetTime (T1.5: the first Windows link blocker
         # after the POSIX libraries were made platform-aware in T2.5).
         $<$<PLATFORM_ID:Windows>:winmm>
+        # error.cpp writes the crash log through imagehlp and winsock (T4.1
+        # removed the MSVC #pragma comment lines that used to carry these).
+        $<$<PLATFORM_ID:Windows>:imagehlp>
+        $<$<PLATFORM_ID:Windows>:ws2_32>
 )
 
 # Unit Tests
