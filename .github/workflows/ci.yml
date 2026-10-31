@@ -31,7 +31,11 @@ jobs:
             cmake \
             ninja-build \
             liblzo2-dev \
-            build-essential
+            build-essential \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libegl-dev \
+            libgl1-mesa-dri
 
       - name: Configure CMake
         env:

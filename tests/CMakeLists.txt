@@ -11,6 +11,7 @@ set(TEST_TARGETS
     test_crc32_vectors
     test_lzo_invariants
     test_tea_invariants
+    test_image_loader
 )
 
 foreach(TEST_NAME ${TEST_TARGETS})
