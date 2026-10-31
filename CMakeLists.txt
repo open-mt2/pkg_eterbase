@@ -43,7 +43,7 @@ set(ETERBASE_SOURCES
     src/FileLoader.cpp
     src/ImageLoaderCompat.cpp
     src/ImageWriterCompat.cpp
-    src/GLCompat.cpp
+    src/backends/gl/GLCompat.cpp
     src/lzo.cpp
     src/MappedFile.cpp
     src/Random.cpp
