@@ -29,6 +29,9 @@ endif()
 # Dependencies
 find_package(PkgConfig QUIET)
 find_library(LZO_LIBRARY NAMES lzo2 lzo REQUIRED)
+# lzo.h is a public EterBase header, so its include directory has to be public
+# too; on Windows cross builds it comes from the deps prefix (T2.3), not the host.
+find_path(LZO_INCLUDE_DIR NAMES lzo/lzo1x.h)
 if(NOT WIN32)
     # Windows cross builds link opengl32 from the MinGW sysroot instead (T1.5).
     find_package(OpenGL REQUIRED)
@@ -130,6 +133,7 @@ endif()
 
 target_include_directories(EterBase
     PUBLIC
+        ${LZO_INCLUDE_DIR}
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/EterBase>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/EterBase/Poly>
