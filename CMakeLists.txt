@@ -8,10 +8,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     set(CMAKE_CXX_EXTENSIONS OFF)
 
-    if(WIN32)
-        add_compile_definitions(WIN32 _WINDOWS _CRT_SECURE_NO_WARNINGS)
-    else()
-        add_compile_definitions(__LINUX__ _GNU_SOURCE)
+    if(NOT WIN32)
         add_compile_options(
             -Wall
             -Wextra
@@ -94,6 +91,15 @@ add_library(EterBase STATIC
     ${ETERBASE_HEADERS}
 )
 add_library(EterBase::EterBase ALIAS EterBase)
+
+# Platform macros must be PUBLIC: consumers (standalone EterLib, ScriptLib,
+# EterGrnLib, SpeedTreeLib, PRTerrainLib, EterPythonLib) include the Platform
+# headers and only see definitions carried by the target they link (issue #79).
+if(WIN32)
+    target_compile_definitions(EterBase PUBLIC WIN32 _WINDOWS _CRT_SECURE_NO_WARNINGS)
+else()
+    target_compile_definitions(EterBase PUBLIC __LINUX__ _GNU_SOURCE)
+endif()
 
 target_include_directories(EterBase
     PUBLIC
