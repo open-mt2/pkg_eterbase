@@ -123,7 +123,7 @@ target_include_directories(EterBase
 target_link_libraries(EterBase
     PUBLIC
         ${LZO_LIBRARY}
-        OpenGL::GL
+        $<$<PLATFORM_ID:Linux>:OpenGL::GL>
 )
 
 # Unit Tests
