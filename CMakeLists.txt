@@ -42,6 +42,7 @@ set(ETERBASE_SOURCES
     src/FileDir.cpp
     src/FileLoader.cpp
     src/ImageLoaderCompat.cpp
+    src/ImageWriterCompat.cpp
     src/lzo.cpp
     src/MappedFile.cpp
     src/Random.cpp
@@ -84,6 +85,8 @@ set(ETERBASE_HEADERS
     include/EterBase/Poly/Symbol.h
     include/EterBase/Poly/SymTable.h
     include/Platform/Platform.h
+    include/Platform/stb_image.h
+    include/Platform/stb_image_write.h
 )
 
 add_library(EterBase STATIC
