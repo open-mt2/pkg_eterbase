@@ -121,13 +121,7 @@ if(WIN32)
         OPENMT2_RENDERER_GL=1
         OPENMT2_SDL_WINDOW=1
         USE_PLATFORM_D3D_COMPAT=1
-        # D10 selects 64-bit; MSVC sets this itself. Python 2.7's pyconfig.h
-        # picks its ABI sizes from it, and lzo's headers read those sizes
-        # (without it lzo claims ILP32 and its compile-time asserts fail).
         MS_WIN64
-        # mingw's strsafe.h otherwise renames strcat/wcscat/... to
-        # *_instead_use_* macros, which breaks the declarations in <intrin.h>
-        # that SDL's SDL_cpuinfo.h pulls in (T1.9).
         STRSAFE_NO_DEPRECATE
     )
 else()
