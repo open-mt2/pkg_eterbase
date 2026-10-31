@@ -12,6 +12,7 @@ set(TEST_TARGETS
     test_lzo_invariants
     test_tea_invariants
     test_image_loader
+    test_render_seam
 )
 
 foreach(TEST_NAME ${TEST_TARGETS})

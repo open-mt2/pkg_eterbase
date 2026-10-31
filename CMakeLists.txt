@@ -43,16 +43,18 @@ set(ETERBASE_SOURCES
     src/FileLoader.cpp
     src/ImageLoaderCompat.cpp
     src/ImageWriterCompat.cpp
-    src/backends/gl/GLCompat.cpp
     src/lzo.cpp
     src/MappedFile.cpp
     src/Random.cpp
+    src/RenderBackend.cpp
     src/StdAfx.cpp
     src/Stl.cpp
     src/tea.cpp
     src/TempFile.cpp
     src/Timer.cpp
     src/Utils.cpp
+    src/backends/gl/GLCompat.cpp
+    src/backends/gl/GLRenderBackend.cpp
     src/Poly/Base.cpp
     src/Poly/Poly.cpp
     src/Poly/Symbol.cpp
@@ -87,6 +89,7 @@ set(ETERBASE_HEADERS
     include/EterBase/Poly/SymTable.h
     include/Platform/Platform.h
     include/Platform/GLCompat.h
+    include/Platform/RenderBackend.h
     include/Platform/stb_image.h
     include/Platform/stb_image_write.h
 )
