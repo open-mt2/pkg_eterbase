@@ -125,6 +125,10 @@ if(WIN32)
         # picks its ABI sizes from it, and lzo's headers read those sizes
         # (without it lzo claims ILP32 and its compile-time asserts fail).
         MS_WIN64
+        # mingw's strsafe.h otherwise renames strcat/wcscat/... to
+        # *_instead_use_* macros, which breaks the declarations in <intrin.h>
+        # that SDL's SDL_cpuinfo.h pulls in (T1.9).
+        STRSAFE_NO_DEPRECATE
     )
 else()
     target_compile_definitions(EterBase PUBLIC
