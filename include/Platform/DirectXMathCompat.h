@@ -2167,47 +2167,4 @@ inline HRESULT D3DXAssembleShaderFromFileA(LPCSTR, const void*, void*, DWORD, LP
 }
 #define D3DXAssembleShaderFromFile D3DXAssembleShaderFromFileA
 
-// =============================================================
-// 7. DirectInput 8 Stubs
-// =============================================================
-#define DIRECTINPUT_VERSION 0x0800
-#define DISCL_EXCLUSIVE     0x00000001
-#define DISCL_NONEXCLUSIVE  0x00000002
-#define DISCL_FOREGROUND    0x00000004
-#define DISCL_BACKGROUND    0x00000008
-
-struct DIDATAFORMAT { int dummy; };
-static const GUID IID_IDirectInput8 = { 0xbf798030, 0x483a, 0x4da2, { 0xaa, 0x99, 0x5d, 0x64, 0xed, 0x36, 0x97, 0x00 } };
-static const GUID GUID_SysKeyboard  = { 0x6f1d2b61, 0xd5a0, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00 } };
-static const DIDATAFORMAT c_dfDIKeyboard = { 0 };
-
-class IDirectInputDevice8A : public IDirect3DResource9 {
-public:
-    HRESULT SetDataFormat(const DIDATAFORMAT*) { return S_OK; }
-    HRESULT SetCooperativeLevel(HWND, DWORD) { return S_OK; }
-    HRESULT Acquire() { return S_OK; }
-    HRESULT Unacquire() { return S_OK; }
-    HRESULT GetDeviceState(DWORD cbData, LPVOID lpvData) {
-        if (lpvData && cbData > 0) std::memset(lpvData, 0, cbData);
-        return S_OK;
-    }
-};
-typedef IDirectInputDevice8A* LPDIRECTINPUTDEVICE8;
-
-class IDirectInput8A : public IDirect3DResource9 {
-public:
-    HRESULT CreateDevice(REFGUID, LPDIRECTINPUTDEVICE8* lplpDirectInputDevice, void*) {
-        if (!lplpDirectInputDevice) return E_INVALIDARG;
-        *lplpDirectInputDevice = new IDirectInputDevice8A();
-        return S_OK;
-    }
-};
-typedef IDirectInput8A* LPDIRECTINPUT8;
-
-inline HRESULT DirectInput8Create(HINSTANCE, DWORD, REFIID, LPVOID* ppvOut, void*) {
-    if (!ppvOut) return E_INVALIDARG;
-    *ppvOut = new IDirectInput8A();
-    return S_OK;
-}
-
 #endif
