@@ -1,11 +1,11 @@
 name: EterBase CI
 
+# CI cost (#93): main-only. Pull requests do not run the matrix; check a
+# branch on demand with `gh workflow run ci.yml --ref <branch>`.
 on:
   push:
-    branches: ["**"]
-  pull_request:
-    branches: ["**"]
-
+    branches: [main, master]
+  workflow_dispatch:
 jobs:
   build-and-test:
     name: Build & Test (${{ matrix.compiler.cxx }}, ${{ matrix.build_type }})
